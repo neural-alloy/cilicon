@@ -118,6 +118,35 @@ targets:
     assert cfg.targets[0].base == "my/custom-arm-image"   # user def wins
 
 
+def test_catalog_has_100_plus_boards_and_sensors():
+    from cilicon import presets
+    assert len(presets.BOARDS) >= 100
+    assert len(presets.SENSORS) >= 20
+
+
+def test_every_catalog_board_loads_and_resolves():
+    """Every built-in board must produce a valid Target + resolvable command
+    through the real config pipeline (catches a typo'd field or tier)."""
+    from cilicon import presets, config
+    import tempfile, os
+    for name, b in presets.BOARDS.items():
+        yml = (f"targets:\n  - id: t\n    board: {name}\n"
+               f"    build: \"true\"\n    artifact: a.bin\n    expect: \"X\"\n")
+        d = tempfile.mkdtemp(); p = os.path.join(d, "cilicon.yml")
+        open(p, "w").write(yml)
+        cfg = config.load(p)              # must not SystemExit
+        presets.resolve(cfg.targets[0])   # must not raise
+
+
+def test_catalog_boards_only_use_real_target_fields():
+    from cilicon import presets
+    from cilicon.config import Target
+    known = set(Target.__dataclass_fields__)
+    for name, b in presets.BOARDS.items():
+        bad = [k for k in b if k not in known]
+        assert not bad, f"board {name} has non-Target fields: {bad}"
+
+
 def test_unknown_board_lists_define_your_own_hint():
     import pytest
     with pytest.raises(SystemExit) as e:

@@ -168,6 +168,13 @@ BOARDS: dict[str, dict] = {
     ),
 }
 
+# The friendly starters above stay; merge in the big grounded catalog (100+
+# boards/chips/GPUs across QEMU machines, qemu-user arches, Renode platforms,
+# and Modal GPUs). Define your own under `boards:` in cilicon.yml to extend it.
+from . import catalog as _catalog  # noqa: E402
+BOARDS = {**BOARDS, **_catalog.BOARDS}
+SENSORS = _catalog.SENSORS
+
 
 # Modal's GPU lineup, smallest → biggest. The `gpu:` field accepts any of these,
 # optionally with a count ("A100-80GB:2"). Unknown names are passed through (so a
