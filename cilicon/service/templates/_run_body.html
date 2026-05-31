@@ -1,0 +1,43 @@
+{# self-contained: polls itself while live, stops once the run is terminal #}
+<div id="run-body"
+     {% if live %}hx-get="/runs/{{ run.id }}/status" hx-trigger="every 3s" hx-swap="outerHTML"{% endif %}>
+
+  {% if run.status in ('queued', 'running') %}
+    <div class="banner running">⏳ {{ run.status }} — fanning every target across its own cloud container…</div>
+  {% elif run.status == 'passed' %}
+    <div class="banner passed">✅ {{ run.passed }}/{{ run.total }} targets built <b>and</b> booted
+      {% if run.wall_seconds %}· {{ run.wall_seconds|round|int }}s wall-clock{% endif %}</div>
+  {% elif run.status == 'failed' %}
+    <div class="banner failed">❌ {{ run.passed }}/{{ run.total }} passed — see the failing targets below</div>
+  {% else %}
+    <div class="banner error">⚠ run error: {{ run.error or 'unknown' }}</div>
+  {% endif %}
+
+  {% if results %}
+  <table class="matrix">
+    <thead><tr>
+      <th></th><th>Target</th><th>Tier</th><th>On-target check</th><th>Flash / RAM</th><th>Time</th><th>Logs</th>
+    </tr></thead>
+    <tbody>
+    {% for t in results %}
+      <tr>
+        <td><span class="dot {{ 'passed' if t.ok else 'failed' }}"></span></td>
+        <td><code>{{ t.target_id }}</code></td>
+        <td class="muted small">{{ t.validate }}</td>
+        <td>{{ t.detail }}</td>
+        <td class="muted small">
+          {% if t.sizes %}{{ (t.sizes.flash / 1024)|round|int }}K / {{ (t.sizes.ram / 1024)|round|int }}K{% else %}—{% endif %}
+        </td>
+        <td class="muted small">{% if t.seconds %}{{ t.seconds|round|int }}s{% endif %}</td>
+        <td class="small">
+          {% if t.log_path %}<a href="/dl/log/{{ t.id }}">log</a>{% endif %}
+          {% if t.artifact_path %} · <a href="/dl/artifact/{{ t.id }}">artifact</a>{% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% elif run.status in ('queued', 'running') %}
+    <p class="muted">Waiting for the first target to report…</p>
+  {% endif %}
+</div>

@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}cilicon · {{ project.full_name }}{% endblock %}
+{% block content %}
+<nav class="crumbs"><a href="/">dashboard</a> / <span>{{ project.full_name }}</span></nav>
+<h2>{{ project.full_name }}</h2>
+
+{% if not runs %}
+  <p class="muted">No runs yet. Push a commit or open a PR to trigger cilicon.</p>
+{% else %}
+<table class="runs">
+  <thead><tr><th></th><th>Commit</th><th>Event</th><th>Targets</th><th>Wall</th><th>When</th></tr></thead>
+  <tbody>
+  {% for r in runs %}
+    <tr class="clickable" onclick="location='/runs/{{ r.id }}'">
+      <td><span class="dot {{ r.status }}"></span></td>
+      <td>
+        <code>{{ r.commit_sha[:7] }}</code>
+        <div class="muted small">{{ r.message or '' }}</div>
+      </td>
+      <td>{{ r.event }}{% if r.pr_number %} #{{ r.pr_number }}{% endif %}</td>
+      <td>{% if r.total %}{{ r.passed }}/{{ r.total }}{% else %}—{% endif %}</td>
+      <td>{% if r.wall_seconds %}{{ r.wall_seconds|round|int }}s{% else %}—{% endif %}</td>
+      <td class="muted small">{{ r.created_at[:19].replace('T',' ') }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}

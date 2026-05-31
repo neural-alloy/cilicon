@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}cilicon{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="https://unpkg.com/htmx.org@1.9.12" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/">⚡ cilicon</a>
+    <span class="tagline">CI for real hardware — without touching metal</span>
+    <nav>
+      {% if user %}
+        <span class="who">
+          {% if user.avatar %}<img class="avatar" src="{{ user.avatar }}" alt="">{% endif %}
+          {{ user.login }}
+        </span>
+        <a class="btn ghost" href="/logout">Sign out</a>
+      {% endif %}
+    </nav>
+  </header>
+  <main class="wrap">
+    {% block content %}{% endblock %}
+  </main>
+  <footer class="foot">cilicon · build <b>and</b> boot every chip you ship to, in parallel, owning zero hardware.</footer>
+</body>
+</html>

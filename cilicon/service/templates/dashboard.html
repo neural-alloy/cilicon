@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}cilicon · dashboard{% endblock %}
+{% block content %}
+<h2>Your projects</h2>
+
+{% if not blocks %}
+  <div class="empty">
+    <p>No repositories yet.</p>
+    <p class="muted">Install the cilicon GitHub App on a repo that has a <code>cilicon.yml</code> at its root,
+       then push or open a PR — cilicon will build and boot the whole target matrix and post a check.</p>
+  </div>
+{% endif %}
+
+{% for block in blocks %}
+  <section class="org">
+    <h3>{{ block.org.github_login }}</h3>
+    {% if not block.projects %}
+      <p class="muted">No repos with the cilicon App installed in this org yet.</p>
+    {% endif %}
+    <div class="cards">
+      {% for p in block.projects %}
+        <a class="card" href="/projects/{{ p.id }}">
+          <div class="card-title">{{ p.full_name }}</div>
+          <div class="muted small">{{ p.default_branch }}{% if p.private %} · private{% endif %}</div>
+        </a>
+      {% endfor %}
+    </div>
+  </section>
+{% endfor %}
+{% endblock %}

@@ -1,0 +1,51 @@
+# cilicon.yml — one matrix, every target builds AND boots in parallel.
+# Each target carries its own toolchain image and its own proof-it-runs.
+
+targets:
+  # --- ARM Linux SoC (Jetson/i.MX-style userspace) -------------------------
+  - id: jetson-perception/linux-arm
+    base: debian:bookworm-slim
+    apt: [gcc-arm-linux-gnueabihf, qemu-user]
+    build: arm-linux-gnueabihf-gcc -static -O2 src/perception.c -o build/perception
+    validate: qemu_user            # ELF loads, libs resolve, reaches main
+    qemu_user_bin: qemu-arm
+    artifact: build/perception
+    expect: "perception: engine ok"
+
+  # --- Bare-metal MCU / RTOS (STM32/Zephyr-style firmware) -----------------
+  - id: stm32h7/cortex-m
+    base: debian:bookworm-slim
+    apt: [gcc-arm-none-eabi, qemu-system-arm]
+    build: >
+      arm-none-eabi-gcc -mcpu=cortex-m3 -mthumb -nostartfiles -nostdlib
+      -ffreestanding -Wl,--build-id=none -T src/cortex-m.ld
+      src/firmware.c -o build/firmware.elf
+    validate: qemu_system          # boot firmware in emulator, drive virtual UART
+    machine: lm3s6965evb
+    artifact: build/firmware.elf
+    expect: "BOOT OK"
+    size_tool: arm-none-eabi-size  # also prove it FITS the silicon, not just boots
+    flash_max: 1M                  # text+data must fit flash  (overflow → red check)
+    ram_max: 256K                  # data+bss must fit RAM
+
+  # --- ESP32 / FreeRTOS (Xtensa — a totally different toolchain world) ------
+  - id: esp32/freertos
+    base: espressif/idf:release-v5.3   # ships the Xtensa toolchain + qemu-xtensa
+    build: >
+      cd /work/src/esp32 && . $IDF_PATH/export.sh >/dev/null 2>&1 &&
+      idf.py set-target esp32 >/dev/null 2>&1 && idf.py build
+    validate: qemu_esp32               # boot the image in qemu-system-xtensa
+    app_dir: src/esp32
+    artifact: src/esp32/build/cilicon_esp32.bin
+    expect: "Hello from cilicon on ESP32"
+    boot_timeout: 45
+
+  # --- A second ARM Linux target that ships a real bug ---------------------
+  - id: pi5-loadtest/linux-arm
+    base: debian:bookworm-slim
+    apt: [gcc-arm-linux-gnueabihf, qemu-user]
+    build: arm-linux-gnueabihf-gcc -static -O2 src/loadtest.c -o build/loadtest
+    validate: qemu_user
+    qemu_user_bin: qemu-arm
+    artifact: build/loadtest
+    expect: "loadtest: ok"          # never printed — crashes in emulation
