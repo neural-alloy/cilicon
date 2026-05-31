@@ -205,7 +205,7 @@ def cmd_presets(args) -> int:
 
 
 def cmd_boards(args) -> int:
-    # show built-in starters + any boards the user defined in their config
+    # built-in catalog + any boards the user defined in their config
     user = {}
     try:
         import yaml
@@ -213,24 +213,44 @@ def cmd_boards(args) -> int:
             user = (yaml.safe_load(f) or {}).get("boards") or {}
     except Exception:
         pass
+    catalog = {**presetmod.BOARDS, **user}
 
-    def _show(name, b):
-        star = c(" (yours)", DIM) if name in user else ""
-        print(f"  • {c(name, B)}{star}  →  validate: {b.get('validate','?')}")
-        print(f"      base: {b.get('base','?')}")
-        if b.get("apt"):
-            print(f"      apt:  {' '.join(b['apt'])}")
+    # group by validation tier so 100+ entries stay scannable
+    by_tier: dict[str, list[str]] = {}
+    for name, b in catalog.items():
+        by_tier.setdefault(b.get("validate", "?"), []).append(name)
 
-    print(f"\n  cilicon · {len(presetmod.BOARDS)} starter boards"
-          + (f" + {len(user)} of your own" if user else "") + "\n")
-    for name, b in presetmod.BOARDS.items():
-        if name not in user:
-            _show(name, b)
-    for name, b in user.items():
-        _show(name, b)
+    total = len(catalog)
+    print(f"\n  cilicon · {total} boards"
+          + (f" ({len(user)} of your own)" if user else "")
+          + "  ·  one-word aliases for a toolchain + tier\n")
+    for tier in sorted(by_tier):
+        names = sorted(by_tier[tier])
+        print(f"  {c(tier, B)} {c('(' + str(len(names)) + ')', DIM)}")
+        # wrap names a few per line
+        line = "    "
+        for n in names:
+            mark = c(n, DIM) if n in user else n
+            if len(line) + len(n) > 76:
+                print(line); line = "    "
+            line += mark + "  "
+        if line.strip():
+            print(line)
     print()
-    print(c("  define your own under top-level `boards:` in cilicon.yml — a board", DIM))
-    print(c("  can set any target field (base, apt, validate, machine, gpu, …).", DIM))
+    print(c("  use:  board: <name>   ·   define your own under `boards:` in cilicon.yml", DIM))
+    print(c("  (a board sets any target field; yours extend/override these).", DIM))
+    print()
+    return 0
+
+
+def cmd_sensors(args) -> int:
+    s = presetmod.SENSORS
+    print(f"\n  cilicon · {len(s)} modeled sensors (peripherals, not boot targets)\n")
+    for name, desc in s.items():
+        print(f"  • {c(name, B)}  {c('— ' + desc, DIM)}")
+    print()
+    print(c("  attach these to a board inside a Renode .resc (validate: renode);", DIM))
+    print(c("  they're I2C/SPI peripherals, so they don't boot on their own.", DIM))
     print()
     return 0
 
@@ -272,6 +292,9 @@ def main(argv=None) -> int:
 
     pg = sub.add_parser("gpus", help="list Modal GPU types for the real_gpu tier")
     pg.set_defaults(func=cmd_gpus)
+
+    ps = sub.add_parser("sensors", help="list modeled sensor peripherals (for Renode)")
+    ps.set_defaults(func=cmd_sensors)
 
     args = p.parse_args(argv)
     if not args.cmd:

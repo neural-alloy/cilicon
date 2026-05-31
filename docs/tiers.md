@@ -110,16 +110,23 @@ boards:
     machine: mps2-an385
 ```
 
-Your boards extend — and can override by name — these built-in starters
-(`cilicon boards` lists everything, including yours):
+Your boards extend — and can override by name — a built-in catalog of **100+
+starters** across families (`cilicon boards` lists them all, grouped by tier):
 
-| Board | validate | base |
+| Family | Examples | Tier |
 |---|---|---|
-| `arm-linux` | `qemu_user` | `debian:bookworm-slim` |
-| `aarch64-linux` | `qemu_user_aarch64` | `debian:bookworm-slim` |
-| `cortex-m` | `qemu_system` (machine `lm3s6965evb`) | `debian:bookworm-slim` |
-| `esp32` | `qemu_esp32` | `espressif/idf:release-v5.3` |
-| `cuda` | `real_gpu` (gpu `T4`) | `nvidia/cuda:12.4.1-devel-ubuntu22.04` |
+| Cortex-M / bare-metal | `ti-lm3s6965`, `arm-mps2-an505`, `bbc-microbit`, `stm32-vldiscovery` | `qemu_system` (real QEMU machine) |
+| ARM Linux SoCs | `rpi-3`, `rpi-5`, `jetson-orin`, `imx8mp`, `rockchip-rk3588` | `qemu_user(_aarch64)` |
+| RISC-V | `sifive-u`, `riscv-spike`, `starfive-visionfive2` | `qemu_system_riscv` / `qemu_user_riscv64` |
+| ESP / Xtensa | `esp32`, `esp32-s3`, `esp32-c3` | `qemu_esp32` |
+| Renode (peripheral-accurate) | `renode-stm32f4-discovery`, `renode-nrf52840`, `renode-hifive1` | `renode` (needs a `.resc`) |
+| GPU (real silicon) | `gpu-t4`, `gpu-a100-80gb`, `gpu-h100` | `real_gpu` |
+
+**Honesty:** these are starting templates, not certified configs. Cortex-M/QEMU-machine
+boards boot directly; ARM/RISC-V *Linux SoC* aliases all resolve to qemu-user (you
+cross-build a Linux ELF — the SoC's peripherals aren't modeled); `renode-*` boards need
+a `.resc`; only `gpu-*` is real silicon. Sensors (`cilicon sensors`) are modeled I2C/SPI
+peripherals you attach in a Renode `.resc`, not boot targets.
 
 ## GPU catalog
 
