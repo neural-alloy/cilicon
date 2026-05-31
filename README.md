@@ -24,7 +24,7 @@ setup → **[docs/github-actions.md](docs/github-actions.md)**.
 ## Or run it locally
 
 ```bash
-pip install -e .       # the cilicon CLI
+pip install cilicon    # the cilicon CLI
 modal token new        # once
 cilicon run            # build + boot the whole matrix in parallel
 ```
