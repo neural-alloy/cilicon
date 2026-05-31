@@ -1,0 +1,110 @@
+# cilicon-advanced.yml — everything dynamic cilicon can do.
+#
+#   cilicon -c examples/cilicon-advanced.yml targets     # see them all expand
+#   cilicon -c examples/cilicon-advanced.yml run         # build + boot the matrix
+#
+# Nothing here required editing cilicon's Python: new arches, a brand-new
+# emulator, a real GPU, and a test suite are all just data.
+
+targets:
+  # --- board catalog: one word = a whole toolchain + tier bundle ----------
+  - id: gateway/arm-linux
+    board: arm-linux                 # base + cross-gcc + qemu-user + qemu-arm
+    build: arm-linux-gnueabihf-gcc -static -O2 src/perception.c -o build/app
+    artifact: build/app
+    expect: "perception: engine ok"
+
+  # --- matrix: fan ONE entry across many arches ---------------------------
+  #   expands to node-arm / node-aarch64 / node-riscv64, each its own container.
+  - id: node-{arch}
+    matrix:
+      arch: [arm, aarch64, riscv64]
+    base: debian:bookworm-slim
+    apt: ["gcc-{arch}-linux-gnu", qemu-user]
+    build: "{arch}-linux-gnu-gcc -static -O2 src/perception.c -o build/app-{arch}"
+    validate: custom
+    run: "stdbuf -oL qemu-{arch} ./build/app-{arch}"   # tier cilicon never hard-coded
+    artifact: build/app-{arch}
+    expect: "perception: engine ok"
+
+  # --- a real test suite that RUNS ON the (emulated) target ---------------
+  - id: firmware/cortex-m
+    board: cortex-m
+    build: >
+      arm-none-eabi-gcc -mcpu=cortex-m3 -mthumb -nostartfiles -nostdlib
+      -ffreestanding -Wl,--build-id=none -T src/cortex-m.ld
+      src/firmware.c -o build/firmware.elf
+    artifact: build/firmware.elf
+    expect: "BOOT OK"                  # validate: it boots and reaches main
+    boot_timeout: 20
+    # size budget: does it FIT? text+data must fit flash, data+bss must fit RAM
+    size_tool: arm-none-eabi-size      # the toolchain's `size`
+    flash_max: 256K                    # accepts 256K / 1M / raw bytes
+    ram_max: 64K
+    # test: a second on-target check, its own pass/fail (exit 0 == pass)
+    test: timeout 20 qemu-system-arm -M lm3s6965evb -nographic -semihosting -kernel build/firmware.elf 2>&1 | grep -q "BOOT OK"
+    test_expect: []
+
+  # --- real silicon: run on an actual GPU in Modal (not emulation) --------
+  - id: infer/cuda
+    board: cuda                        # nvidia/cuda image + gpu: T4
+    build: nvcc -O2 src/gpu/infer.cu -o build/infer
+    artifact: build/infer
+    expect: "infer: gpu ok"
+    artifacts: [build/infer]           # pull the binary back with --artifacts
+
+  # --- a bigger GPU, picked by name (cilicon gpus lists them all) ----------
+  - id: infer/h100
+    base: nvidia/cuda:12.4.1-devel-ubuntu22.04
+    build: nvcc -O2 src/gpu/infer.cu -o build/infer
+    validate: real_gpu
+    gpu: "H100"                        # any Modal GPU; add a count like "H100:2"
+    artifact: build/infer
+    expect: "infer: gpu ok"
+
+  # --- bare-metal RISC-V firmware -----------------------------------------
+  - id: firmware/riscv
+    board: riscv-virt
+    build: riscv64-unknown-elf-gcc -nostdlib -nostartfiles -Tsrc/cortex-m.ld src/firmware.c -o build/fw-rv.elf
+    artifact: build/fw-rv.elf
+    expect: "BOOT OK"
+
+  # --- Renode: models the real board's PERIPHERALS, not just the CPU -------
+  #   The antmicro/renode image ships renode + board platform descriptions;
+  #   the .resc boots the board and tees its modeled USART to a file cilicon
+  #   reads back. (Illustrative: this reuses the cortex-m3 demo firmware, whose
+  #   linker map won't match the F4 — swap in firmware built for the board.)
+  - id: sensor/stm32f4-renode
+    base: antmicro/renode:latest
+    apt: [gcc-arm-none-eabi]
+    build: >
+      arm-none-eabi-gcc -mcpu=cortex-m4 -mthumb -nostartfiles -nostdlib
+      -ffreestanding -Wl,--build-id=none -T src/cortex-m.ld
+      src/firmware.c -o build/firmware.elf
+    validate: renode
+    renode_script: examples/renode/stm32f4_discovery.resc
+    artifact: build/firmware.elf
+    expect: "BOOT OK"
+    boot_timeout: 90
+
+  # --- ARM Fast Model (FVP) / vendor cycle-accurate sim --------------------
+  #   Higher fidelity than QEMU (real core timing + peripherals). The FVP is a
+  #   licensed Linux binary you bring in your own image, then just name it.
+  # - id: dsp/cortex-m4-fvp
+  #   dockerfile: docker/fvp.Dockerfile   # an image with the FVP installed
+  #   build: arm-none-eabi-gcc ... -o build/app.axf
+  #   validate: sim
+  #   sim_bin: FVP_MPS2_Cortex-M4          # the simulator binary
+  #   sim_args: "-C mps2.platform_type=0 --stat"
+  #   artifact: build/app.axf
+  #   expect: "BOOT OK"
+
+  # --- env + secrets (e.g. a vendor license server cilicon can reach) -------
+  # - id: fpga/vivado
+  #   dockerfile: docker/vivado.Dockerfile
+  #   build: vivado -mode batch -source build.tcl
+  #   validate: custom
+  #   run: "grep -q 'timing met' vivado.log"
+  #   env: { XILINXD_LICENSE_FILE: "2100@license.internal" }
+  #   secrets: [vivado-license]         # a Modal secret, mounted into the sandbox
+  #   expect_exit: 0

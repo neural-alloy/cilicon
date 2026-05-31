@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}cilicon · run {{ run.commit_sha[:7] }}{% endblock %}
+{% block content %}
+<nav class="crumbs">
+  <a href="/">dashboard</a> /
+  <a href="/projects/{{ project.id }}">{{ project.full_name }}</a> /
+  <span>{{ run.commit_sha[:7] }}</span>
+</nav>
+
+<div class="run-head">
+  <h2><span class="dot {{ run.status }}"></span> {{ run.message or run.commit_sha[:7] }}</h2>
+  <div class="muted">
+    {{ run.event }}{% if run.pr_number %} #{{ run.pr_number }}{% endif %}
+    · <code>{{ run.commit_sha[:12] }}</code>
+    {% if run.triggered_by %} · by {{ run.triggered_by }}{% endif %}
+  </div>
+</div>
+
+{% include "_run_body.html" %}
+{% endblock %}

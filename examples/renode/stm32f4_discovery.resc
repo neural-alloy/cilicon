@@ -1,0 +1,31 @@
+:name: cilicon · STM32F4 Discovery (headless)
+:description: Boot firmware on a modeled STM32F4 Discovery and tee USART2 to a file.
+
+# cilicon's `renode` tier runs this headless: it loads the real board platform
+# (with its peripherals — not just the CPU like QEMU), loads the firmware ELF,
+# captures the modeled UART to a file, runs briefly, and quits. cilicon then
+# cats that file so the firmware's `expect:` string lands in stdout.
+#
+# The antmicro/renode image ships renode + the platform descriptions referenced
+# below (@platforms/...). Override $bin from the target's `artifact`.
+
+using sysbus
+
+$bin ?= @/work/build/firmware.elf
+
+mach create "fw"
+machine LoadPlatformDescription @platforms/boards/stm32f4_discovery.repl
+
+# Tee the modeled USART2 to the file cilicon reads back (renode_uart_log).
+# `true` = overwrite each run.
+sysbus.usart2 CreateFileBackend @/tmp/cilicon_uart.log true
+
+macro reset
+"""
+    sysbus LoadELF $bin
+"""
+runMacro $reset
+
+# Let the firmware boot and print over the modeled peripheral, then stop.
+emulation RunFor "5"
+quit

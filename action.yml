@@ -1,0 +1,68 @@
+# cilicon — GitHub Action
+#
+# Build AND boot your code across every chip in cilicon.yml, in parallel, on
+# Modal's cloud — then publish the matrix as a normal PR check (JUnit + a
+# Markdown summary). cilicon is a STEP inside your CI, not a CI platform.
+#
+#   - uses: RyanRana/cilicon@v1
+#     with:
+#       config: cilicon.yml
+#     env:
+#       MODAL_TOKEN_ID:     ${{ secrets.MODAL_TOKEN_ID }}
+#       MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+#
+# See docs/github-actions.md for the full setup (Modal secrets, gating PRs).
+name: cilicon
+description: Build AND boot your firmware across every chip you ship to, in parallel, owning zero hardware.
+author: Ryan Rana
+branding:
+  icon: cpu
+  color: green
+inputs:
+  config:
+    description: path to cilicon.yml (relative to your repo)
+    required: false
+    default: cilicon.yml
+  target:
+    description: run a single target by id; empty = the whole matrix
+    required: false
+    default: ""
+  report:
+    description: path to write the JUnit report
+    required: false
+    default: cilicon-results.xml
+  artifacts:
+    description: directory to pull built artifacts into
+    required: false
+    default: cilicon-artifacts
+  telemetry:
+    description: optional path to append JSONL run/target/phase events
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    # Install cilicon itself from the action's own checkout — NOT the caller's
+    # repo. github.action_path is where this action (the cilicon repo) lives.
+    - name: Install cilicon
+      shell: bash
+      run: pip install "${{ github.action_path }}"
+    - name: Build + boot the matrix
+      shell: bash
+      run: |
+        cilicon -c "${{ inputs.config }}" run \
+          ${{ inputs.target && format('--target {0}', inputs.target) || '' }} \
+          --junit "${{ inputs.report }}" \
+          --summary "$GITHUB_STEP_SUMMARY" \
+          --artifacts "${{ inputs.artifacts }}" \
+          ${{ inputs.telemetry && format('--telemetry {0}', inputs.telemetry) || '' }}
+    - name: Upload artifacts + report
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: cilicon-results
+        path: |
+          ${{ inputs.artifacts }}/**
+          ${{ inputs.report }}
+          ${{ inputs.telemetry }}
+        if-no-files-found: ignore

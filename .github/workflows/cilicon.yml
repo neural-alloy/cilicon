@@ -1,0 +1,37 @@
+# cilicon — build AND boot every target in cilicon.yml on every push / PR.
+#
+# This repo dogfoods its own action (uses: ./). In YOUR repo you'd write:
+#     uses: RyanRana/cilicon@v1
+#
+# Setup (once): add two repo secrets from `modal token new`:
+#     MODAL_TOKEN_ID, MODAL_TOKEN_SECRET
+# Then make "cilicon / build + boot" a required status check to gate merges.
+name: cilicon
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-and-boot:
+    name: build + boot          # → check shows up as "cilicon / build + boot"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: cilicon
+        uses: ./                 # in your repo: RyanRana/cilicon@v1
+        with:
+          config: cilicon.yml
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+      - name: Publish check
+        uses: mikepenz/action-junit-report@v4
+        if: always()
+        with:
+          report_paths: cilicon-results.xml
+          check_name: cilicon results

@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# cilicon outputs
+cilicon-artifacts/
+forge-artifacts/
+*.jsonl
+cilicon-results.xml
+out/
+.cilicon/
+
+# local env / secrets
+.env
+.env.*
+*.local
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
