@@ -93,6 +93,20 @@ cilicon run --junit out.xml --artifacts ./out
 cilicon run -t stm32                       # just one target
 ```
 
+## Publishing (maintainers)
+
+cilicon ships to PyPI as `cilicon` via **Trusted Publishing** — GitHub Actions
+authenticates to PyPI over OIDC, so no API token is ever stored. One-time setup:
+
+1. On [PyPI](https://pypi.org), add a **pending trusted publisher** for the project
+   `cilicon`: owner `RyanRana`, repo `cilicon`, workflow `publish.yml`,
+   environment `pypi`.
+2. In the GitHub repo, create an Environment named `pypi`.
+3. Publish a **GitHub Release** (tag `v0.1.0`) — `.github/workflows/publish.yml`
+   builds the sdist + wheel and publishes them. Done.
+
+Manual fallback (token-based): `python -m build && python -m twine upload dist/*`.
+
 ## Next steps
 
 - [github-actions.md](github-actions.md) — the primary way to use cilicon: a step in your existing CI that gates merges.

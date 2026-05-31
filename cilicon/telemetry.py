@@ -22,7 +22,7 @@ from typing import Optional
 def _version() -> str:
     try:
         from importlib.metadata import version
-        return version("cilicon-ci")
+        return version("cilicon")
     except Exception:
         return "0.0.0"
 

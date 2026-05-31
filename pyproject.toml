@@ -1,15 +1,41 @@
 [project]
-name = "cilicon-ci"
+name = "cilicon"
 version = "0.1.0"
-description = "CI for real hardware — build AND boot across every chip you ship to, in parallel, owning zero hardware."
+description = "CI that proves your code runs where it ships — build AND boot across every chip, arch, and GPU you target, in parallel, owning zero hardware."
+readme = "README.md"
 requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [{ name = "Ryan Rana" }]
+keywords = [
+    "ci", "embedded", "firmware", "emulation", "qemu", "renode",
+    "modal", "hardware", "gpu", "riscv", "esp32", "cortex-m",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Testing",
+    "Topic :: Software Development :: Embedded Systems",
+    "Topic :: System :: Hardware",
+]
 dependencies = [
     "modal>=1.0",
     "pyyaml>=6.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/RyanRana/cilicon"
+Repository = "https://github.com/RyanRana/cilicon"
+Issues = "https://github.com/RyanRana/cilicon/issues"
+
 [project.optional-dependencies]
-# the hosted service: GitHub App webhook + dashboard, persisting to Supabase
+# the optional reference dashboard (not the product): GitHub App + Supabase
 service = [
     "fastapi>=0.110",
     "uvicorn[standard]>=0.29",
