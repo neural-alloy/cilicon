@@ -223,7 +223,7 @@ CRASH_SIGNATURES: dict[str, list[str]] = {
     "qemu_system":          ["HardFault", "BusFault", "UsageFault", "MemManage fault", "CPU lockup"],
     "qemu_system_aarch64":  ["Synchronous Abort", "Kernel panic"],
     "qemu_system_riscv":    ["Kernel panic", "Unhandled trap"],
-    "qemu_esp32":           ["Guru Meditation Error", "abort() was called", "rst:0x"],
+    "qemu_esp32":           ["Guru Meditation Error", "abort() was called"],
     "qemu_user":            ["Segmentation fault", "Aborted", "Illegal instruction", "(core dumped)"],
     "qemu_user_aarch64":    ["Segmentation fault", "Aborted", "(core dumped)"],
     "qemu_user_riscv64":    ["Segmentation fault", "Aborted", "(core dumped)"],
