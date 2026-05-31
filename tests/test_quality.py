@@ -50,6 +50,18 @@ def test_esp32_guru_meditation_is_a_fault():
     assert not j.ok
 
 
+def test_esp32_normal_boot_with_reset_reason_is_not_a_fault():
+    # real ESP32 boot prints a reset-reason line "rst:0x1 (POWERON_RESET)" — that
+    # is NORMAL, not a crash. (Regression: the first real Modal run false-failed on it.)
+    log = (
+        "rst:0x1 (POWERON_RESET),boot:0x13 (SPI_FAST_FLASH_BOOT)\n"
+        "Hello from cilicon on ESP32\n"
+        "cilicon: FreeRTOS tick 3\ncilicon: app_main done\n"
+    )
+    j = runner._judge(_t(validate="qemu_esp32", expect=["Hello from cilicon on ESP32"]), 124, log, 5.0)
+    assert j.ok, j.detail
+
+
 # ---- feature 3+4+5: regression baseline ------------------------------------
 
 def _res(tid, ok=True, flash=None, ram=None, boot=0.5, log="boot ok"):
