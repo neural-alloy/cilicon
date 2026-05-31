@@ -61,15 +61,73 @@ def test_gpu_split_and_known():
     assert not presets.gpu_known("MADE-UP")
 
 
-def test_gpu_boards_select_real_gpu_and_carry_gpu():
-    for board, gpu in [("cuda", "T4"), ("cuda-a100", "A100-80GB"), ("cuda-h100", "H100")]:
-        b = presets.BOARDS[board]
-        assert b["validate"] == "real_gpu" and b["gpu"] == gpu
+def test_cuda_board_selects_real_gpu():
+    b = presets.BOARDS["cuda"]
+    assert b["validate"] == "real_gpu" and b["gpu"] == "T4"
 
 
 def test_real_gpu_field_overrides_default_and_supports_count():
     t = _t(validate="real_gpu", gpu="H100:2", artifact="build/infer")
     assert presets.resolve(t).gpu == "H100:2"
+
+
+# ---- user-defined boards ---------------------------------------------------
+
+def _load_yml(yml: str):
+    import tempfile, os
+    from cilicon import config
+    d = tempfile.mkdtemp(); p = os.path.join(d, "cilicon.yml")
+    open(p, "w").write(yml)
+    return config.load(p)
+
+
+def test_user_can_define_their_own_board():
+    cfg = _load_yml("""
+boards:
+  my-mcu:
+    base: my-registry/toolchain:latest
+    apt: [gcc-arm-none-eabi, qemu-system-arm]
+    validate: qemu_system
+    machine: mps2-an385
+targets:
+  - id: widget
+    board: my-mcu
+    build: "make"
+    artifact: build/fw.elf
+    expect: "READY"
+""")
+    t = cfg.targets[0]
+    assert t.base == "my-registry/toolchain:latest"
+    assert t.validate == "qemu_system" and t.machine == "mps2-an385"
+
+
+def test_user_board_can_override_a_builtin():
+    cfg = _load_yml("""
+boards:
+  cortex-m:                       # same name as a built-in starter
+    base: my/custom-arm-image
+    apt: [gcc-arm-none-eabi, qemu-system-arm]
+    validate: qemu_system
+    machine: lm3s6965evb
+targets:
+  - id: w
+    board: cortex-m
+    build: "make"
+    artifact: a.elf
+""")
+    assert cfg.targets[0].base == "my/custom-arm-image"   # user def wins
+
+
+def test_unknown_board_lists_define_your_own_hint():
+    import pytest
+    with pytest.raises(SystemExit) as e:
+        _load_yml("""
+targets:
+  - id: w
+    board: nonexistent
+    build: "make"
+""")
+    assert "boards:" in str(e.value)
 
 
 # ---- telemetry: pure event builders ----------------------------------------

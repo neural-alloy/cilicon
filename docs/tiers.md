@@ -94,22 +94,32 @@ The escape hatch: you supply **`run:`** — any tier cilicon has never heard of,
   expect_exit: 0
 ```
 
-## Board catalog
+## Boards (define your own)
 
-A board is a one-word alias that fills `base` / `apt` / `validate` / `machine` / `qemu_bin` / `gpu` as defaults (anything you set explicitly wins). Run `cilicon boards`.
+A board is a one-word alias for a bundle of target fields, applied as defaults
+(anything you set explicitly on the target wins). **Define your own** under a
+top-level `boards:` in `cilicon.yml` — a board can set *any* target field, so
+shape it to whatever you ship:
 
-| Board | validate | base | apt |
-|---|---|---|---|
-| `arm-linux` | `qemu_user` | `debian:bookworm-slim` | `gcc-arm-linux-gnueabihf`, `qemu-user` |
-| `aarch64-linux` | `qemu_user_aarch64` | `debian:bookworm-slim` | `gcc-aarch64-linux-gnu`, `qemu-user` |
-| `riscv64-linux` | `qemu_user_riscv64` | `debian:bookworm-slim` | `gcc-riscv64-linux-gnu`, `qemu-user` |
-| `cortex-m` | `qemu_system` (machine `lm3s6965evb`) | `debian:bookworm-slim` | `gcc-arm-none-eabi`, `qemu-system-arm` |
-| `riscv-virt` | `qemu_system_riscv` (machine `virt`) | `debian:bookworm-slim` | `gcc-riscv64-unknown-elf`, `qemu-system-misc` |
-| `esp32` | `qemu_esp32` | `espressif/idf:release-v5.3` | — |
-| `cuda` | `real_gpu` (gpu `T4`) | `nvidia/cuda:12.4.1-devel-ubuntu22.04` | — |
-| `cuda-l4` | `real_gpu` (gpu `L4`) | `nvidia/cuda:12.4.1-devel-ubuntu22.04` | — |
-| `cuda-a100` | `real_gpu` (gpu `A100-80GB`) | `nvidia/cuda:12.4.1-devel-ubuntu22.04` | — |
-| `cuda-h100` | `real_gpu` (gpu `H100`) | `nvidia/cuda:12.4.1-devel-ubuntu22.04` | — |
+```yaml
+boards:
+  my-mcu:                      # then use:  board: my-mcu
+    base: my-registry/toolchain:latest
+    apt: [gcc-arm-none-eabi, qemu-system-arm]
+    validate: qemu_system
+    machine: mps2-an385
+```
+
+Your boards extend — and can override by name — these built-in starters
+(`cilicon boards` lists everything, including yours):
+
+| Board | validate | base |
+|---|---|---|
+| `arm-linux` | `qemu_user` | `debian:bookworm-slim` |
+| `aarch64-linux` | `qemu_user_aarch64` | `debian:bookworm-slim` |
+| `cortex-m` | `qemu_system` (machine `lm3s6965evb`) | `debian:bookworm-slim` |
+| `esp32` | `qemu_esp32` | `espressif/idf:release-v5.3` |
+| `cuda` | `real_gpu` (gpu `T4`) | `nvidia/cuda:12.4.1-devel-ubuntu22.04` |
 
 ## GPU catalog
 

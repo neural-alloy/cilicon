@@ -138,8 +138,10 @@ PRESETS: dict[str, Preset] = {
 }
 
 
-# A board is a one-word alias for a (base + apt + tier + machine) bundle.
-# Values are applied as defaults: anything the target sets explicitly wins.
+# A board is a one-word alias for a bundle of target fields, applied as defaults
+# (anything the target sets explicitly wins). These are just a few STARTERS —
+# define your own under a top-level `boards:` in cilicon.yml for whatever you
+# ship. A board can set ANY target field, so it's fully yours to shape.
 BOARDS: dict[str, dict] = {
     "arm-linux": dict(
         base="debian:bookworm-slim",
@@ -151,20 +153,10 @@ BOARDS: dict[str, dict] = {
         apt=["gcc-aarch64-linux-gnu", "qemu-user"],
         validate="qemu_user_aarch64", qemu_bin="qemu-aarch64",
     ),
-    "riscv64-linux": dict(
-        base="debian:bookworm-slim",
-        apt=["gcc-riscv64-linux-gnu", "qemu-user"],
-        validate="qemu_user_riscv64", qemu_bin="qemu-riscv64",
-    ),
     "cortex-m": dict(
         base="debian:bookworm-slim",
         apt=["gcc-arm-none-eabi", "qemu-system-arm"],
         validate="qemu_system", machine="lm3s6965evb",
-    ),
-    "riscv-virt": dict(
-        base="debian:bookworm-slim",
-        apt=["gcc-riscv64-unknown-elf", "qemu-system-misc"],
-        validate="qemu_system_riscv", machine="virt",
     ),
     "esp32": dict(
         base="espressif/idf:release-v5.3",
@@ -173,18 +165,6 @@ BOARDS: dict[str, dict] = {
     "cuda": dict(
         base="nvidia/cuda:12.4.1-devel-ubuntu22.04",
         validate="real_gpu", gpu="T4",
-    ),
-    "cuda-l4": dict(
-        base="nvidia/cuda:12.4.1-devel-ubuntu22.04",
-        validate="real_gpu", gpu="L4",
-    ),
-    "cuda-a100": dict(
-        base="nvidia/cuda:12.4.1-devel-ubuntu22.04",
-        validate="real_gpu", gpu="A100-80GB",
-    ),
-    "cuda-h100": dict(
-        base="nvidia/cuda:12.4.1-devel-ubuntu22.04",
-        validate="real_gpu", gpu="H100",
     ),
 }
 

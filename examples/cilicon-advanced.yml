@@ -6,6 +6,16 @@
 # Nothing here required editing cilicon's Python: new arches, a brand-new
 # emulator, a real GPU, and a test suite are all just data.
 
+# Define your OWN boards — one-word aliases for whatever your hardware needs.
+# A board can set any target field; reference it with `board: <name>`. These
+# extend (and can override) cilicon's built-in starters.
+boards:
+  riscv-virt:
+    base: debian:bookworm-slim
+    apt: [gcc-riscv64-unknown-elf, qemu-system-misc]
+    validate: qemu_system_riscv
+    machine: virt
+
 targets:
   # --- board catalog: one word = a whole toolchain + tier bundle ----------
   - id: gateway/arm-linux
