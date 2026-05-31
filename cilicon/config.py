@@ -158,9 +158,11 @@ def _parse_size(v) -> Optional[int]:
     return int(float(m.group(1)) * mult)
 
 
-def _normalize(raw: dict) -> dict:
+def _normalize(raw: dict, boards: dict) -> dict:
     """Apply board + preset defaults and field aliases to a concrete (already
-    matrix-expanded) raw target dict. Explicit user values always win."""
+    matrix-expanded) raw target dict. Explicit user values always win.
+    `boards` is the merged catalog: built-in starters + the user's own
+    `boards:` from cilicon.yml (user definitions win)."""
     raw = dict(raw)
 
     # alias: qemu_user_bin (old name) -> qemu_bin
@@ -170,12 +172,12 @@ def _normalize(raw: dict) -> dict:
     # board: fill the bundle as defaults
     board = raw.get("board")
     if board:
-        if board not in presets.BOARDS:
+        if board not in boards:
             raise SystemExit(
                 f"cilicon: target {raw.get('id','?')} unknown board '{board}' "
-                f"(known: {sorted(presets.BOARDS)})"
+                f"(known: {sorted(boards)} — or define it under top-level `boards:`)"
             )
-        for k, v in presets.BOARDS[board].items():
+        for k, v in boards[board].items():
             raw.setdefault(k, v)
 
     # preset defaults (e.g. qemu_bin for a riscv tier, machine for a system tier)
@@ -236,16 +238,30 @@ def load(path: str = "cilicon.yml") -> Config:
     if not targets_raw:
         raise SystemExit("cilicon: config has no targets")
 
+    boards = _merge_boards(raw.get("boards") or {})
+
     targets: list[Target] = []
     seen: set[str] = set()
     for i, t in enumerate(targets_raw):
         if not isinstance(t, dict):
             raise SystemExit(f"cilicon: target #{i} is not a mapping")
         for concrete in _expand_matrix(t):
-            tgt = _build_target(_normalize(concrete), i)
+            tgt = _build_target(_normalize(concrete, boards), i)
             if tgt.id in seen:
                 raise SystemExit(f"cilicon: duplicate target id '{tgt.id}'")
             seen.add(tgt.id)
             targets.append(tgt)
 
     return Config(targets=targets, project_dir=project_dir)
+
+
+def _merge_boards(user_boards: dict) -> dict:
+    """Built-in starter boards + the user's own `boards:` (user wins). A board
+    is just a bundle of target fields applied as defaults — define whatever your
+    hardware needs, reference it by name with `board: <name>`."""
+    if not isinstance(user_boards, dict):
+        raise SystemExit("cilicon: top-level `boards:` must be a mapping of name -> fields")
+    for name, spec in user_boards.items():
+        if not isinstance(spec, dict):
+            raise SystemExit(f"cilicon: board '{name}' must be a mapping of fields")
+    return {**presets.BOARDS, **user_boards}

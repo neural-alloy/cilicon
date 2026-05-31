@@ -205,12 +205,32 @@ def cmd_presets(args) -> int:
 
 
 def cmd_boards(args) -> int:
-    print(f"\n  cilicon · {len(presetmod.BOARDS)} board presets (one-word toolchain bundles)\n")
-    for name, b in presetmod.BOARDS.items():
-        print(f"  • {c(name, B)}  →  validate: {b.get('validate','?')}")
+    # show built-in starters + any boards the user defined in their config
+    user = {}
+    try:
+        import yaml
+        with open(args.config) as f:
+            user = (yaml.safe_load(f) or {}).get("boards") or {}
+    except Exception:
+        pass
+
+    def _show(name, b):
+        star = c(" (yours)", DIM) if name in user else ""
+        print(f"  • {c(name, B)}{star}  →  validate: {b.get('validate','?')}")
         print(f"      base: {b.get('base','?')}")
         if b.get("apt"):
             print(f"      apt:  {' '.join(b['apt'])}")
+
+    print(f"\n  cilicon · {len(presetmod.BOARDS)} starter boards"
+          + (f" + {len(user)} of your own" if user else "") + "\n")
+    for name, b in presetmod.BOARDS.items():
+        if name not in user:
+            _show(name, b)
+    for name, b in user.items():
+        _show(name, b)
+    print()
+    print(c("  define your own under top-level `boards:` in cilicon.yml — a board", DIM))
+    print(c("  can set any target field (base, apt, validate, machine, gpu, …).", DIM))
     print()
     return 0
 
