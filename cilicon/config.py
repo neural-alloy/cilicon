@@ -54,6 +54,8 @@ class Target:
     expect: list[str] = field(default_factory=list)  # ALL substrings must appear
     expect_regex: str = ""             # a regex that must match the output
     expect_exit: Optional[int] = None  # require this exact exit code
+    expect_not: list[str] = field(default_factory=list)  # NONE may appear (fault strings)
+    crash_check: bool = True           # auto-fail on tier crash markers (HardFault, …)
 
     # --- size budget: does the artifact actually fit the silicon? ---------
     size_tool: str = ""                # e.g. "arm-none-eabi-size"; runs on artifact
@@ -63,6 +65,10 @@ class Target:
     # --- optional test phase: run a suite ON the target after it boots ----
     test: str = ""                     # command (in /work) whose exit 0 == pass
     test_expect: list[str] = field(default_factory=list)
+    test_format: str = ""              # "" (exit code) | "unity" | "tap" — parse results
+
+    # --- CI ergonomics ----------------------------------------------------
+    paths: list[str] = field(default_factory=list)  # only run if a changed file matches
 
     # --- plumbing ---------------------------------------------------------
     env: dict = field(default_factory=dict)     # exported in the sandbox
@@ -187,8 +193,8 @@ def _normalize(raw: dict, boards: dict) -> dict:
         for k, v in p.defaults.items():
             raw.setdefault(k, v)
 
-    # expect / test_expect: accept a scalar or a list, store as a list
-    for key in ("expect", "test_expect"):
+    # list fields: accept a scalar or a list, store as a list
+    for key in ("expect", "test_expect", "expect_not", "paths"):
         if key in raw and not isinstance(raw[key], list):
             raw[key] = [raw[key]]
 

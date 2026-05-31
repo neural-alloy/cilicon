@@ -214,6 +214,30 @@ _TEMPLATE_FIELDS = (
 )
 
 
+# Fault markers that mean "it ran but crashed" — failed even if `expect` matched
+# (firmware can print BOOT OK and *then* HardFault). Kept specific to avoid
+# false positives; a target can opt out with `crash_check: false` or add its own
+# via `expect_not:`.
+_CRASH_COMMON = ["stack smashing detected"]
+CRASH_SIGNATURES: dict[str, list[str]] = {
+    "qemu_system":          ["HardFault", "BusFault", "UsageFault", "MemManage fault", "CPU lockup"],
+    "qemu_system_aarch64":  ["Synchronous Abort", "Kernel panic"],
+    "qemu_system_riscv":    ["Kernel panic", "Unhandled trap"],
+    "qemu_esp32":           ["Guru Meditation Error", "abort() was called", "rst:0x"],
+    "qemu_user":            ["Segmentation fault", "Aborted", "Illegal instruction", "(core dumped)"],
+    "qemu_user_aarch64":    ["Segmentation fault", "Aborted", "(core dumped)"],
+    "qemu_user_riscv64":    ["Segmentation fault", "Aborted", "(core dumped)"],
+    "renode":               ["HardFault", "CPU abort", "lockup"],
+    "native":               ["Segmentation fault", "Aborted", "(core dumped)"],
+    "real_gpu":             ["CUDA error", "an illegal memory access", "out of memory"],
+}
+
+
+def crash_signatures(tier: str) -> list[str]:
+    """Auto fault markers for a tier (common + tier-specific)."""
+    return _CRASH_COMMON + CRASH_SIGNATURES.get(tier, [])
+
+
 def is_tier(name: str) -> bool:
     return name in PRESETS
 

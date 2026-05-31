@@ -9,6 +9,7 @@ from . import config as cfgmod
 from . import presets as presetmod
 from . import report as reportmod
 from . import telemetry as telemetrymod
+from . import baseline as baselinemod
 from .runner import TargetResult, run_matrix
 
 G = "\033[32m"; R = "\033[31m"; Y = "\033[33m"; DIM = "\033[2m"; B = "\033[1m"; X = "\033[0m"
@@ -56,6 +57,11 @@ def cmd_run(args) -> int:
     if not targets:
         print(f"cilicon: no target matching '{args.target}'")
         return 2
+
+    targets = _filter_changed(targets, args)
+    if not targets:
+        print("\n  cilicon · no targets affected by the changed files — nothing to run\n")
+        return 0
 
     w_id = max(28, max(len(t.id) for t in targets) + 1)
     print()
@@ -120,8 +126,69 @@ def cmd_run(args) -> int:
                 print(c(f"  ⬇ {r.target.id}: {a}", DIM))
     print()
 
+    regressed = _handle_baseline(args, results)
     _write_reports(args, results, wall)
-    return 0 if passed == len(results) else 1
+    failed = passed != len(results) or (regressed and getattr(args, "fail_on_regression", False))
+    return 1 if failed else 0
+
+
+def _changed_files(args) -> list[str] | None:
+    """Files changed, from --changed-files or `git diff --name-only <ref>`.
+    Returns None when no filter was requested (→ run everything)."""
+    if getattr(args, "changed_files", None):
+        return [f.strip() for f in args.changed_files.split(",") if f.strip()]
+    if getattr(args, "changed_since", None):
+        import subprocess
+        try:
+            out = subprocess.run(
+                ["git", "diff", "--name-only", args.changed_since],
+                capture_output=True, text=True, check=True).stdout
+            return [l.strip() for l in out.splitlines() if l.strip()]
+        except Exception as e:  # noqa: BLE001
+            print(c(f"  could not compute changed files ({e}); running all targets", DIM))
+            return None
+    return None
+
+
+def _filter_changed(targets, args):
+    changed = _changed_files(args)
+    if changed is None:
+        return targets
+    import fnmatch
+    kept = []
+    for t in targets:
+        # a target with no `paths` always runs; otherwise it must match a change
+        if not t.paths or any(fnmatch.fnmatch(f, pat) for pat in t.paths for f in changed):
+            kept.append(t)
+    skipped = len(targets) - len(kept)
+    if skipped:
+        print(c(f"  ↓ {skipped} target(s) skipped — no matching changed files", DIM))
+    return kept
+
+
+def _handle_baseline(args, results) -> bool:
+    """Update or compare against a baseline. Returns True if a SEVERE regression
+    (a size growth past the threshold) was found."""
+    if getattr(args, "update_baseline", None):
+        baselinemod.save(baselinemod.build(results), args.update_baseline)
+        print(c(f"  baseline written to {args.update_baseline}", DIM))
+    if not getattr(args, "baseline", None):
+        return False
+    try:
+        base = baselinemod.load(args.baseline)
+    except FileNotFoundError:
+        print(c(f"  baseline {args.baseline} not found — skipping regression check", DIM))
+        return False
+    regs = baselinemod.compare(results, base, pct=getattr(args, "regression_pct", 5.0))
+    if not regs:
+        print(c("  ✓ no regressions vs baseline", DIM))
+        return False
+    print()
+    for g in regs:
+        mark = c("✗", R) if g.severe else c("⚠", Y)
+        print(f"  {mark} {g.target}: {g.detail}")
+    print()
+    return baselinemod.has_severe(regs)
 
 
 def _write_reports(args, results, wall: float) -> None:
@@ -243,6 +310,45 @@ def cmd_boards(args) -> int:
     return 0
 
 
+def cmd_doctor(args) -> int:
+    """Validate cilicon.yml without running anything: parse, resolve every tier,
+    and flag weak checks — config errors in 50ms instead of a cloud round-trip."""
+    cfg = cfgmod.load(args.config)   # raises SystemExit on parse errors
+    print(f"\n  cilicon doctor · {len(cfg.targets)} target(s) in {args.config}\n")
+    errors = 0
+    for t in cfg.targets:
+        problems, warns = [], []
+        try:
+            presetmod.resolve(t)     # tier guards: custom/sim/renode/unknown
+        except Exception as e:       # noqa: BLE001
+            problems.append(str(e).split(": ", 1)[-1])
+        if not (t.expect or t.expect_regex or t.expect_exit is not None):
+            warns.append("no expect/expect_regex/expect_exit — a green check only means 'didn't crash'")
+        if t.gpu and not presetmod.gpu_known(t.gpu):
+            warns.append(f"gpu '{t.gpu}' isn't in the known list (still passed to Modal)")
+        if (t.flash_max is not None or t.ram_max is not None) and not t.size_tool and t.validate != "native":
+            warns.append("flash_max/ram_max set but no size_tool — size check may not run")
+        if t.test_format and not t.test:
+            warns.append("test_format set but no test command")
+
+        if problems:
+            errors += 1
+            print(c(f"  ✗ {t.id}", R))
+            for p in problems:
+                print(c(f"      error: {p}", R))
+        else:
+            print(c(f"  ✓ {t.id}", G) + c(f"  {t.validate}", DIM))
+        for w in warns:
+            print(c(f"      ⚠ {w}", Y))
+    print()
+    if errors:
+        print(c(f"  {errors} target(s) with errors", R))
+    else:
+        print(c("  all targets resolve — ready to run", B))
+    print()
+    return 1 if errors else 0
+
+
 def cmd_sensors(args) -> int:
     s = presetmod.SENSORS
     print(f"\n  cilicon · {len(s)} modeled sensors (peripherals, not boot targets)\n")
@@ -279,6 +385,12 @@ def main(argv=None) -> int:
     pr.add_argument("--artifacts", help="directory to pull built artifacts into")
     pr.add_argument("--telemetry", help="append JSONL run/target/phase events to this path")
     pr.add_argument("--telemetry-stdout", action="store_true", help="also print telemetry events to stdout")
+    pr.add_argument("--baseline", help="compare flash/RAM/boot-time/log against this baseline JSON")
+    pr.add_argument("--update-baseline", help="write this run as the new baseline JSON")
+    pr.add_argument("--fail-on-regression", action="store_true", help="fail if a size regression exceeds the threshold")
+    pr.add_argument("--regression-pct", type=float, default=5.0, help="size growth %% that counts as a regression (default 5)")
+    pr.add_argument("--changed-files", help="comma-separated changed files; run only targets whose paths match")
+    pr.add_argument("--changed-since", help="git ref; run only targets whose paths match files changed since it")
     pr.set_defaults(func=cmd_run)
 
     pt = sub.add_parser("targets", help="list configured targets")
@@ -296,12 +408,18 @@ def main(argv=None) -> int:
     ps = sub.add_parser("sensors", help="list modeled sensor peripherals (for Renode)")
     ps.set_defaults(func=cmd_sensors)
 
+    pd = sub.add_parser("doctor", help="validate cilicon.yml without running anything")
+    pd.set_defaults(func=cmd_doctor)
+
     args = p.parse_args(argv)
     if not args.cmd:
         # bare `cilicon` == `cilicon run`
         args.target = None
         args.json = args.junit = args.summary = args.artifacts = args.telemetry = None
         args.telemetry_stdout = False
+        args.baseline = args.update_baseline = args.changed_files = args.changed_since = None
+        args.fail_on_regression = False
+        args.regression_pct = 5.0
         return cmd_run(args)
     return args.func(args)
 

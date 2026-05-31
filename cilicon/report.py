@@ -41,6 +41,7 @@ def to_json(results, wall_seconds: float) -> str:
                 "build": _step_dict(r.build),
                 "validate_step": _step_dict(r.validate),
                 "test": _step_dict(r.test),
+                "test_cases": r.test_cases or None,
                 "size": _step_dict(r.size),
                 "sizes": r.sizes or None,
             }
@@ -96,7 +97,11 @@ def to_markdown(results, wall_seconds: float) -> str:
     if fails:
         lines += ["", "<details><summary>Failure logs</summary>", ""]
         for r in fails:
-            lines += [f"**`{r.target.id}`**", "```", _failure_text(r)[:3000], "```"]
+            lines.append(f"**`{r.target.id}`**")
+            failed_tests = [c["name"] for c in r.test_cases if not c["ok"]]
+            if failed_tests:
+                lines.append("failed tests: " + ", ".join(f"`{n}`" for n in failed_tests))
+            lines += ["```", _failure_text(r)[:3000], "```"]
         lines.append("</details>")
     return "\n".join(lines)
 

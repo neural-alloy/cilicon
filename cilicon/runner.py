@@ -18,7 +18,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Optional
 
-from . import presets, sizes
+from . import presets, sizes, testparse
 from .config import Config, Target
 
 APP_NAME = "cilicon"
@@ -48,6 +48,7 @@ class TargetResult:
     test: Optional[StepResult] = None
     size: Optional[StepResult] = None
     sizes: dict = field(default_factory=dict)   # {text,data,bss,flash,ram,...}
+    test_cases: list = field(default_factory=list)  # parsed Unity/TAP {name, ok}
     artifacts: list[str] = field(default_factory=list)
     error: str = ""
 
@@ -201,7 +202,16 @@ def _expectations_met(t: Target, out: str) -> tuple[bool, str]:
     return True, ""
 
 
-def _judge(t: Target, code: int, out: str) -> _Judgement:
+def _forbidden_hit(t: Target, out: str) -> Optional[str]:
+    """A fault string that means 'ran but crashed' — user `expect_not` plus the
+    tier's auto crash markers (unless crash_check is off). Returns the first hit."""
+    forbidden = list(t.expect_not)
+    if t.crash_check:
+        forbidden += presets.crash_signatures(t.validate)
+    return next((f for f in forbidden if f and f in out), None)
+
+
+def _judge(t: Target, code: int, out: str, seconds: Optional[float] = None) -> _Judgement:
     """Decide whether 'it actually runs'. The expect string(s) are the on-target
     smoke proof; for full-system boots we don't require a clean emulator exit."""
     full_system = presets.resolve(t).full_system
@@ -209,6 +219,11 @@ def _judge(t: Target, code: int, out: str) -> _Judgement:
     proof = " + ".join(t.expect) if t.expect else (
         f"/{t.expect_regex}/" if t.expect_regex else "runs"
     )
+
+    # a fault marker fails the target even if `expect` was printed first
+    fault = _forbidden_hit(t, out)
+    if fault:
+        return _Judgement(False, f"fault after start ('{fault}')")
 
     if t.expect_exit is not None:
         if code != t.expect_exit:
@@ -222,7 +237,10 @@ def _judge(t: Target, code: int, out: str) -> _Judgement:
         # killed by the boot timeout so a clean exit isn't meaningful.
         if met:
             return _Judgement(True, f"boots, reaches main ('{proof}')")
-        return _Judgement(False, why or "no boot signal in emulator")
+        # not met: hung (ran out the clock) vs exited/crashed early
+        if seconds is not None and t.boot_timeout and seconds >= t.boot_timeout * 0.9:
+            return _Judgement(False, f"hung — no '{proof}' in {int(seconds)}s")
+        return _Judgement(False, why or f"exited before reaching '{proof}'")
 
     # qemu_user / native / real_gpu: require clean exit AND the expected proof
     if code != 0:
@@ -283,7 +301,7 @@ def run_target(t: Target, project_dir: str, app, artifacts_dir: str = "") -> Tar
         if vraw is None:
             res.validate = StepResult("validate", False, 0, "", "validator never ran")
         else:
-            verdict = _judge(t, _rc_int(_marker(out, "VALIDATE_END").get("rc", "?")), vraw.output)
+            verdict = _judge(t, _rc_int(_marker(out, "VALIDATE_END").get("rc", "?")), vraw.output, vraw.seconds)
             res.validate = StepResult("validate", verdict.ok, vraw.seconds, vraw.output, verdict.detail)
 
         # optional test phase
@@ -292,15 +310,18 @@ def run_target(t: Target, project_dir: str, app, artifacts_dir: str = "") -> Tar
             if traw is None:
                 res.test = StepResult("test", False, 0, "", "test phase never ran")
             else:
-                ok = traw.ok
-                detail = traw.detail
+                run = testparse.parse(traw.output, t.test_format)
+                if run.parsed:
+                    res.test_cases = run.cases
+                    ok = traw.ok and run.failed == 0
+                    detail = run.summary() if (traw.ok or run.failed) else run.summary() + " (runner exit nonzero)"
+                else:
+                    ok, detail = traw.ok, ("tests passed" if traw.ok else traw.detail)
                 if ok and t.test_expect:
                     for sub in t.test_expect:
                         if sub not in traw.output:
                             ok, detail = False, f"missing '{sub}'"
                             break
-                if ok:
-                    detail = "tests passed"
                 res.test = StepResult("test", ok, traw.seconds, traw.output, detail)
 
         # pull artifacts back out (best-effort; never fails the target)

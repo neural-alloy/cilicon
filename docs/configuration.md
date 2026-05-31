@@ -60,6 +60,8 @@ Every target needs at least an `id` and a `build`. Unknown fields are rejected, 
 | `expect` | list of strings | **All** substrings must appear in the output. A scalar is accepted and wrapped into a one-element list. |
 | `expect_regex` | string | A regex that must match the output. |
 | `expect_exit` | int | Require this exact exit code. |
+| `expect_not` | list of strings | **None** may appear — fault strings that fail the target even if `expect` matched (e.g. `[panic, "assert failed"]`). |
+| `crash_check` | bool | Auto-fail on the tier's crash markers (`HardFault`, `Guru Meditation Error`, `Segmentation fault`, …) even after `expect` matched. Default `true`; `false` opts out. |
 
 ### Size budget — does the artifact fit the silicon?
 
@@ -77,6 +79,15 @@ Size checks parse GNU `size` in both Berkeley and SysV formats. A budget of "uns
 |---|---|---|
 | `test` | string | Command (in `/work`) whose exit `0` == pass — a second on-target check beyond the boot smoke-proof. |
 | `test_expect` | list of strings | Strings the test output must contain (scalar accepted, wrapped into a list). |
+| `test_format` | string | `unity` or `tap` — parse the runner's output into per-test pass/fail rows (blank = judge by exit code only). |
+
+### CI ergonomics
+
+| Field | Type | Meaning |
+|---|---|---|
+| `paths` | list of glob strings | Only run this target when a changed file matches (with `cilicon run --changed-files` / `--changed-since`). No `paths` ⇒ always runs. |
+
+Regression tracking is run-level, not per-target: `cilicon run --baseline b.json` compares flash/RAM/boot-time/boot-log against a saved baseline (write one with `--update-baseline b.json`); `--fail-on-regression` fails the run on a size regression past `--regression-pct` (default 5%). Validate a config without running anything with `cilicon doctor`.
 
 ### Plumbing
 

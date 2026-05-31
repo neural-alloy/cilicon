@@ -39,6 +39,14 @@ inputs:
     description: optional path to append JSONL run/target/phase events
     required: false
     default: ""
+  baseline:
+    description: optional baseline JSON to check for flash/RAM/boot regressions
+    required: false
+    default: ""
+  fail-on-regression:
+    description: fail the check if a size regression exceeds the threshold
+    required: false
+    default: "false"
 runs:
   using: composite
   steps:
@@ -55,7 +63,9 @@ runs:
           --junit "${{ inputs.report }}" \
           --summary "$GITHUB_STEP_SUMMARY" \
           --artifacts "${{ inputs.artifacts }}" \
-          ${{ inputs.telemetry && format('--telemetry {0}', inputs.telemetry) || '' }}
+          ${{ inputs.telemetry && format('--telemetry {0}', inputs.telemetry) || '' }} \
+          ${{ inputs.baseline && format('--baseline {0}', inputs.baseline) || '' }} \
+          ${{ inputs.fail-on-regression == 'true' && '--fail-on-regression' || '' }}
     - name: Upload artifacts + report
       if: always()
       uses: actions/upload-artifact@v4
