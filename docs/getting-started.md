@@ -113,4 +113,5 @@ Manual fallback (token-based): `python -m build && python -m twine upload dist/*
 - [configuration.md](configuration.md) — the complete `cilicon.yml` field reference.
 - [tiers.md](tiers.md) — every validation tier, board, and GPU, with honesty about fidelity.
 - [telemetry.md](telemetry.md) — structured observability for every run.
+- [architecture.md](architecture.md) — how cilicon works internally, module by module — read this before contributing.
 - The root [README.md](../README.md) for the project overview.
