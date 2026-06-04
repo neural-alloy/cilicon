@@ -35,5 +35,6 @@ cilicon run            # build + boot the whole matrix in parallel
 - **[GitHub Actions](docs/github-actions.md)** — wire it into CI, gate PRs
 - **[Configuration](docs/configuration.md)** — the `cilicon.yml` reference
 - **[Tiers](docs/tiers.md)** — the validation tiers (QEMU, Renode, GPU, …)
+- **[Architecture](docs/architecture.md)** — how it works internally; start here to contribute
 
 MIT © Ryan Rana
