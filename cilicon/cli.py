@@ -233,8 +233,32 @@ def _print_result_line(tid, r: TargetResult, w_id):
     print(_row_cells(_cell(tid, w_id), build, check))
 
 
+def _targets_report(cfg) -> dict:
+    """The data behind `cilicon targets` — pure, so agents can consume it via
+    `--json` (and it's unit-testable without a render)."""
+    out = []
+    for t in cfg.targets:
+        proof = " + ".join(t.expect) if t.expect else (t.expect_regex or None)
+        out.append({
+            "id": t.id,
+            "build": t.build,
+            "validate": t.validate,
+            "machine": t.machine if t.validate.startswith("qemu_system") else None,
+            "proves": proof,
+            "test": t.test or None,
+            "flash_max": t.flash_max,
+            "ram_max": t.ram_max,
+            "gpu": t.gpu or None,
+        })
+    return {"tool": "cilicon", "count": len(cfg.targets), "targets": out}
+
+
 def cmd_targets(args) -> int:
     cfg = cfgmod.load(args.config)
+    if getattr(args, "json", False):
+        import json
+        print(json.dumps(_targets_report(cfg), indent=2))
+        return 0
     print(f"\n  cilicon · {len(cfg.targets)} targets in {args.config}\n")
     for t in cfg.targets:
         print(f"  • {c(t.id, B)}")
@@ -310,11 +334,11 @@ def cmd_boards(args) -> int:
     return 0
 
 
-def cmd_doctor(args) -> int:
-    """Validate cilicon.yml without running anything: parse, resolve every tier,
-    and flag weak checks — config errors in 50ms instead of a cloud round-trip."""
-    cfg = cfgmod.load(args.config)   # raises SystemExit on parse errors
-    print(f"\n  cilicon doctor · {len(cfg.targets)} target(s) in {args.config}\n")
+def _doctor_report(cfg) -> dict:
+    """The data behind `cilicon doctor` — pure, so agents can consume it via
+    `--json`. Resolves every tier and flags weak checks without running anything.
+    Returns {ok, errors, targets:[{id,validate,ok,errors,warnings}]}."""
+    targets = []
     errors = 0
     for t in cfg.targets:
         problems, warns = [], []
@@ -330,23 +354,40 @@ def cmd_doctor(args) -> int:
             warns.append("flash_max/ram_max set but no size_tool — size check may not run")
         if t.test_format and not t.test:
             warns.append("test_format set but no test command")
-
         if problems:
             errors += 1
-            print(c(f"  ✗ {t.id}", R))
-            for p in problems:
-                print(c(f"      error: {p}", R))
+        targets.append({"id": t.id, "validate": t.validate, "ok": not problems,
+                        "errors": problems, "warnings": warns})
+    return {"tool": "cilicon", "ok": errors == 0, "errors": errors, "targets": targets}
+
+
+def cmd_doctor(args) -> int:
+    """Validate cilicon.yml without running anything: parse, resolve every tier,
+    and flag weak checks — config errors in 50ms instead of a cloud round-trip."""
+    cfg = cfgmod.load(args.config)   # raises SystemExit on parse errors
+    report = _doctor_report(cfg)
+    if getattr(args, "json", False):
+        import json
+        print(json.dumps(report, indent=2))
+        return 1 if report["errors"] else 0
+
+    print(f"\n  cilicon doctor · {len(cfg.targets)} target(s) in {args.config}\n")
+    for t in report["targets"]:
+        if t["ok"]:
+            print(c(f"  ✓ {t['id']}", G) + c(f"  {t['validate']}", DIM))
         else:
-            print(c(f"  ✓ {t.id}", G) + c(f"  {t.validate}", DIM))
-        for w in warns:
+            print(c(f"  ✗ {t['id']}", R))
+            for p in t["errors"]:
+                print(c(f"      error: {p}", R))
+        for w in t["warnings"]:
             print(c(f"      ⚠ {w}", Y))
     print()
-    if errors:
-        print(c(f"  {errors} target(s) with errors", R))
+    if report["errors"]:
+        print(c(f"  {report['errors']} target(s) with errors", R))
     else:
         print(c("  all targets resolve — ready to run", B))
     print()
-    return 1 if errors else 0
+    return 1 if report["errors"] else 0
 
 
 def cmd_sensors(args) -> int:
@@ -394,6 +435,7 @@ def main(argv=None) -> int:
     pr.set_defaults(func=cmd_run)
 
     pt = sub.add_parser("targets", help="list configured targets")
+    pt.add_argument("--json", action="store_true", help="emit the target list as JSON")
     pt.set_defaults(func=cmd_targets)
 
     pp = sub.add_parser("presets", help="list built-in validation tiers")
@@ -409,6 +451,7 @@ def main(argv=None) -> int:
     ps.set_defaults(func=cmd_sensors)
 
     pd = sub.add_parser("doctor", help="validate cilicon.yml without running anything")
+    pd.add_argument("--json", action="store_true", help="emit the doctor report as JSON")
     pd.set_defaults(func=cmd_doctor)
 
     args = p.parse_args(argv)
