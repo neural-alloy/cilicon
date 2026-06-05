@@ -1,0 +1,34 @@
+# cilicon
+
+> CI for real hardware: build AND boot firmware across every chip, arch, and GPU
+> you ship to — in parallel, in Modal cloud containers, owning zero hardware.
+> Regular CI tells you your code compiled; cilicon tells you it runs on the chip.
+> The unit of work is a "target" in cilicon.yml (a toolchain + a build command +
+> a way to prove the artifact actually boots). Validation tiers and boards are
+> data, not code, so adding a chip is a YAML entry. Language- and RTOS-agnostic.
+
+## For agents working in this repo
+
+- [AGENTS.md](AGENTS.md): commands, code map, conventions, and the invariants not to break — read this first.
+- [docs/architecture.md](docs/architecture.md): module-by-module technical breakdown with file:line anchors.
+- [CONTRIBUTING.md](CONTRIBUTING.md): dev setup and PR conventions.
+
+## Using cilicon
+
+- [README.md](README.md): the 30-second overview and quickstart.
+- [docs/getting-started.md](docs/getting-started.md): install, Modal auth, first run, reading the output.
+- [docs/configuration.md](docs/configuration.md): the complete cilicon.yml field reference.
+- [docs/github-actions.md](docs/github-actions.md): wire cilicon into CI as a PR check.
+- [docs/tiers.md](docs/tiers.md): every validation tier, board, and GPU — with honesty about fidelity.
+- [docs/telemetry.md](docs/telemetry.md): structured run/target/phase events and sinks.
+
+## Key commands
+
+- `cilicon doctor`: validate cilicon.yml and resolve every tier (~50ms, no cloud) — the safe check for agents.
+- `cilicon targets` / `cilicon presets` / `cilicon boards` / `cilicon gpus`: list config, offline.
+- `cilicon run --json out.json`: build + boot the matrix in cloud containers; emits machine-readable results (costs money, needs Modal).
+
+## Optional
+
+- [SERVICE.md](SERVICE.md): the optional hosted dashboard (FastAPI + Supabase + GitHub App).
+- [examples/cilicon-advanced.yml](examples/cilicon-advanced.yml): a fuller config (matrix, custom tier, real_gpu, size budget, test phase, Renode).

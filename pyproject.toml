@@ -48,9 +48,14 @@ service = [
 dev = [
     "pytest>=8.0",
 ]
+# expose cilicon to MCP-capable coding agents (cilicon-mcp)
+mcp = [
+    "mcp>=1.2",
+]
 
 [project.scripts]
 cilicon = "cilicon.cli:main"
+cilicon-mcp = "cilicon.mcp:main"
 
 [build-system]
 requires = ["setuptools>=61"]
