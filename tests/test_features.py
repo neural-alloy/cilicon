@@ -66,6 +66,14 @@ def test_cuda_board_selects_real_gpu():
     assert b["validate"] == "real_gpu" and b["gpu"] == "T4"
 
 
+def test_jetson_thor_is_aarch64_linux():
+    # Thor is an aarch64 Linux SoC — cross-built userspace under qemu-aarch64,
+    # same tier as the other Jetsons. (The reference board for Carbonium fleets.)
+    for name in ("jetson-thor", "jetson-agx-thor"):
+        b = presets.BOARDS[name]
+        assert b["validate"] == "qemu_user_aarch64" and b["qemu_bin"] == "qemu-aarch64"
+
+
 def test_real_gpu_field_overrides_default_and_supports_count():
     t = _t(validate="real_gpu", gpu="H100:2", artifact="build/infer")
     assert presets.resolve(t).gpu == "H100:2"

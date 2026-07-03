@@ -99,7 +99,8 @@ for _name in [
 # ARM64 Linux SoCs — cross-built aarch64 Linux userspace under qemu-aarch64
 for _name in [
     "rpi-3", "rpi-4", "rpi-5", "jetson-nano", "jetson-tx2", "jetson-xavier",
-    "jetson-orin", "rockchip-rk3399", "rockchip-rk3588", "imx8mq", "imx8mp",
+    "jetson-orin", "jetson-thor", "jetson-agx-thor",
+    "rockchip-rk3399", "rockchip-rk3588", "imx8mq", "imx8mp",
     "imx8mm", "snapdragon-845", "snapdragon-8cx", "mediatek-mt8183",
     "amlogic-s905", "allwinner-a64", "marvell-armada-8040", "ampere-altra",
     "aws-graviton2", "aws-graviton3", "broadcom-bcm2712", "ti-am62", "nxp-ls1046a",
