@@ -62,6 +62,11 @@ class Target:
     flash_max: Optional[int] = None    # bytes; text+data must fit (accepts "256K")
     ram_max: Optional[int] = None      # bytes; data+bss must fit  (accepts "64K")
 
+    # --- security gate: is the artifact safe to ship? --------------------
+    sbom: bool = False                 # generate a CycloneDX SBOM (syft) for the artifact
+    vuln_gate: str = ""                # ""|"none"|"kev"|"high"|"critical" — CVE admission policy
+    waivers: list[str] = field(default_factory=list)  # CVE ids: still reported, don't gate
+
     # --- optional test phase: run a suite ON the target after it boots ----
     test: str = ""                     # command (in /work) whose exit 0 == pass
     test_expect: list[str] = field(default_factory=list)
@@ -194,7 +199,7 @@ def _normalize(raw: dict, boards: dict) -> dict:
             raw.setdefault(k, v)
 
     # list fields: accept a scalar or a list, store as a list
-    for key in ("expect", "test_expect", "expect_not", "paths"):
+    for key in ("expect", "test_expect", "expect_not", "paths", "waivers"):
         if key in raw and not isinstance(raw[key], list):
             raw[key] = [raw[key]]
 

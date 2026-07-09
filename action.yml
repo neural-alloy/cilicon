@@ -47,6 +47,26 @@ inputs:
     description: fail the check if a size regression exceeds the threshold
     required: false
     default: "false"
+  sign:
+    description: "cosign-sign each green artifact (keyless OIDC — caller needs permissions: id-token: write)"
+    required: false
+    default: "false"
+  sbom:
+    description: generate a CycloneDX SBOM (syft) per green artifact
+    required: false
+    default: "false"
+  evidence:
+    description: write a signed evidence bundle (SBOM + signature + SLSA provenance) to this path
+    required: false
+    default: ""
+  cosign-key:
+    description: cosign key for signing (default is keyless — leave empty for Fulcio/Rekor)
+    required: false
+    default: ""
+  kev-catalog:
+    description: CISA KEV catalog JSON, enabling the vuln gate's 'kev' policy
+    required: false
+    default: ""
 runs:
   using: composite
   steps:
@@ -55,6 +75,21 @@ runs:
     - name: Install cilicon
       shell: bash
       run: pip install "${{ github.action_path }}"
+    # Only when the run asks to prove-and-sign: syft (SBOM), grype (vuln gate),
+    # cosign (signature). Pinned installers; skipped entirely otherwise so a plain
+    # boot-test run stays dependency-free. cilicon degrades gracefully if a tool is
+    # missing, but the Action installs them so `sign: true` actually signs.
+    - name: Install evidence tools (syft · grype · cosign)
+      if: inputs.sign == 'true' || inputs.sbom == 'true' || inputs.evidence != ''
+      shell: bash
+      env:
+        COSIGN_VERSION: v2.4.1
+      run: |
+        curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
+        curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin
+        sudo curl -sSfLo /usr/local/bin/cosign \
+          "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-linux-amd64"
+        sudo chmod +x /usr/local/bin/cosign
     - name: Build + boot the matrix
       shell: bash
       run: |
@@ -65,8 +100,13 @@ runs:
           --artifacts "${{ inputs.artifacts }}" \
           ${{ inputs.telemetry && format('--telemetry {0}', inputs.telemetry) || '' }} \
           ${{ inputs.baseline && format('--baseline {0}', inputs.baseline) || '' }} \
-          ${{ inputs.fail-on-regression == 'true' && '--fail-on-regression' || '' }}
-    - name: Upload artifacts + report
+          ${{ inputs.fail-on-regression == 'true' && '--fail-on-regression' || '' }} \
+          ${{ inputs.sbom == 'true' && '--sbom' || '' }} \
+          ${{ inputs.sign == 'true' && '--sign' || '' }} \
+          ${{ inputs.cosign-key && format('--cosign-key {0}', inputs.cosign-key) || '' }} \
+          ${{ inputs.evidence && format('--evidence {0}', inputs.evidence) || '' }} \
+          ${{ inputs.kev-catalog && format('--kev-catalog {0}', inputs.kev-catalog) || '' }}
+    - name: Upload artifacts + report + evidence
       if: always()
       uses: actions/upload-artifact@v4
       with:
@@ -75,4 +115,5 @@ runs:
           ${{ inputs.artifacts }}/**
           ${{ inputs.report }}
           ${{ inputs.telemetry }}
+          ${{ inputs.evidence }}
         if-no-files-found: ignore

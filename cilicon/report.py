@@ -12,6 +12,8 @@ from __future__ import annotations
 import json
 from xml.sax.saxutils import escape, quoteattr
 
+from . import triage as triagemod
+
 
 def _step_dict(step) -> dict | None:
     if step is None:
@@ -24,12 +26,13 @@ def _step_dict(step) -> dict | None:
     }
 
 
-def to_json(results, wall_seconds: float) -> str:
+def to_json(results, wall_seconds: float, triage_history: dict | None = None) -> str:
     payload = {
         "tool": "cilicon",
         "passed": sum(1 for r in results if r.ok),
         "total": len(results),
         "wall_seconds": round(wall_seconds, 3),
+        "triage": triagemod.summarize(results, history=triage_history),
         "targets": [
             {
                 "id": r.target.id,
@@ -44,6 +47,8 @@ def to_json(results, wall_seconds: float) -> str:
                 "test_cases": r.test_cases or None,
                 "size": _step_dict(r.size),
                 "sizes": r.sizes or None,
+                "vuln": _step_dict(getattr(r, "vuln", None)),
+                "evidence": getattr(r, "evidence", None) or None,
             }
             for r in results
         ],
@@ -78,12 +83,16 @@ def to_markdown(results, wall_seconds: float) -> str:
             check = "build failed"
         elif r.size and not r.size.ok:
             check = f"⚠ {r.size.detail}"
+        elif getattr(r, "vuln", None) and not r.vuln.ok:
+            check = f"🛡 {r.vuln.detail}"
         elif r.validate:
             check = r.validate.detail + (" · tests ✓" if (r.test and r.test.ok) else "")
             if r.test and not r.test.ok:
                 check = f"test: {r.test.detail}"
         else:
             check = "—"
+        if r.ok and any(e.get("signed") for e in getattr(r, "evidence", []) or []):
+            check += " · 🔏 signed"
         flash = r.sizes.get("flash")
         size = "" if not flash else f"{flash/1024:.0f}K flash"
         lines.append(f"| {mark} | `{r.target.id}` | {build} | {check} | {size} |")
@@ -92,6 +101,8 @@ def to_markdown(results, wall_seconds: float) -> str:
     if grids:
         lines += ["", "#### Fan-out sweep", "",
                   "_one spec → many cells, each its own cloud container_"] + grids
+
+    lines += _triage_block(results) + _evidence_line(results)
 
     fails = [r for r in results if not r.ok]
     if fails:
@@ -169,10 +180,33 @@ def _sweep_grids(results) -> list[str]:
     return out
 
 
+def _triage_block(results) -> list[str]:
+    """Root-cause clusters — only when more than one target failed (a single red
+    needs no clustering, and an all-green run stays untouched)."""
+    tri = triagemod.summarize(results)
+    if not (tri["failures"] > 1 and tri["root_causes"]):
+        return []
+    out = ["", f"#### {tri['root_causes']} root cause(s) across {tri['failures']} failures", ""]
+    for cl in tri["clusters"]:
+        tags = ", ".join(f"`{t}`" for t in cl["targets"])
+        since = f" · seen since {cl['since']}" if cl.get("since") else ""
+        label = cl["signature"] or cl["detail"]
+        out.append(f"- **{cl['count']}×** {cl['phase']} · {label}{since} — {tags}")
+    return out
+
+
+def _evidence_line(results) -> list[str]:
+    ev = [e for r in results for e in (getattr(r, "evidence", []) or [])]
+    if not ev:
+        return []
+    signed = sum(1 for e in ev if e.get("signed"))
+    return ["", f"🔏 evidence: {signed}/{len(ev)} artifact(s) signed · SBOM + SLSA provenance bundled"]
+
+
 def _first_fail(r):
     """The step that actually failed, in pipeline order — so the one-line
     failure message names the real culprit (e.g. size), not whatever ran last."""
-    for step in (r.build, r.size, r.validate, r.test):
+    for step in (r.build, r.size, getattr(r, "vuln", None), r.validate, r.test):
         if step and not step.ok:
             return step
     return None
@@ -189,7 +223,7 @@ def _failure_text(r) -> str:
     if r.error:
         return f"orchestration error: {r.error}"
     bits = []
-    for step in (r.build, r.size, r.validate, r.test):
+    for step in (r.build, r.size, getattr(r, "vuln", None), r.validate, r.test):
         if step and not step.ok:
             tail = "\n".join(step.output.strip().splitlines()[-12:])
             bits.append(f"[{step.name}] {step.detail}\n{tail}")

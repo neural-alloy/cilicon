@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import time
 
@@ -10,7 +11,7 @@ from . import presets as presetmod
 from . import report as reportmod
 from . import telemetry as telemetrymod
 from . import baseline as baselinemod
-from .runner import TargetResult, run_matrix
+from .runner import StepResult, TargetResult, run_matrix
 
 G = "\033[32m"; R = "\033[31m"; Y = "\033[33m"; DIM = "\033[2m"; B = "\033[1m"; X = "\033[0m"
 
@@ -96,6 +97,7 @@ def cmd_run(args) -> int:
     t0 = time.time()
     results = run_matrix(cfg, args.target, on_update, artifacts_dir=args.artifacts or "")
     wall = time.time() - t0
+    _handle_evidence(args, results)   # SBOM + vuln gate + sign (the gate may flip .ok)
     rec.run_completed(results, wall)
     rec.close()
 
@@ -127,7 +129,8 @@ def cmd_run(args) -> int:
     print()
 
     regressed = _handle_baseline(args, results)
-    _write_reports(args, results, wall)
+    history = _handle_triage_history(args, results)
+    _write_reports(args, results, wall, history)
     failed = passed != len(results) or (regressed and getattr(args, "fail_on_regression", False))
     return 1 if failed else 0
 
@@ -191,10 +194,121 @@ def _handle_baseline(args, results) -> bool:
     return baselinemod.has_severe(regs)
 
 
-def _write_reports(args, results, wall: float) -> None:
+def _evidence_wanted(args, targets) -> bool:
+    return bool(getattr(args, "evidence", None) or getattr(args, "sbom", False)
+                or getattr(args, "sign", False) or any(t.vuln_gate for t in targets))
+
+
+def _artifacts_of(r) -> list[str]:
+    return [a for a in (r.artifacts or []) if os.path.isfile(a)]
+
+
+def _handle_evidence(args, results) -> None:
+    """Post-run, host-side: the vuln gate (which can flip a target red), then an
+    SBOM + signature + SLSA provenance for every target that is STILL green — so we
+    never sign an artifact that failed the gate. Needs artifacts pulled (--artifacts);
+    each external tool degrades gracefully when it isn't installed."""
+    import json
+
+    from . import evidence as evmod
+    from . import tools as toolsmod
+    from . import vuln as vulnmod
+
+    if not _evidence_wanted(args, [r.target for r in results]):
+        return
+
+    def warn(m):
+        print(c(f"  ⚠ {m}", Y))
+
+    want_sbom = bool(getattr(args, "sbom", False) or getattr(args, "evidence", None))
+    want_sign = bool(getattr(args, "sign", False) or getattr(args, "evidence", None))
+    key = getattr(args, "cosign_key", None)
+    kev = toolsmod.kev_ids(getattr(args, "kev_catalog", None), warn=warn)
+    ci = evmod.ci_context(os.environ)
+
+    # pass 1 — the CVE gate, before any signing
+    for r in results:
+        t = r.target
+        if not t.vuln_gate or not r.ok:
+            continue
+        arts = _artifacts_of(r)
+        if not arts:
+            warn(f"{t.id}: vuln_gate set but no pulled artifact (need `artifacts:` + --artifacts)")
+            continue
+        worst = None
+        for art in arts:
+            rep = vulnmod.evaluate(toolsmod.scan(art, warn=warn), t.vuln_gate, t.waivers, kev_ids=kev)
+            if worst is None or not rep.ok:
+                worst = rep
+        r.vuln = StepResult("vuln", worst.ok, 0.0, json.dumps(worst.to_dict(), indent=2), worst.detail)
+        if not worst.ok:
+            print(c(f"  ✗ {t.id}: vuln gate — {worst.detail}", R))
+
+    # pass 2 — SBOM + sign + provenance for targets that are still green
+    if want_sbom or want_sign or getattr(args, "evidence", None):
+        for r in results:
+            t = r.target
+            if not r.ok:
+                continue
+            arts = _artifacts_of(r)
+            if not arts:
+                if getattr(args, "evidence", None):
+                    warn(f"{t.id}: no pulled artifact to prove (need `artifacts:` + --artifacts)")
+                continue
+            for art in arts:
+                digest = toolsmod.digest_file(art)
+                sbom_str = toolsmod.sbom(art, warn=warn) if want_sbom else None
+                sig = cert = None
+                if want_sign:
+                    signed = toolsmod.sign_blob(art, key, warn=warn)
+                    if signed:
+                        sig, cert = signed
+                prov = evmod.provenance(os.path.basename(art), digest, ci) if getattr(args, "evidence", None) else None
+                r.evidence.append(evmod.entry(
+                    t.id, art, digest, sbom=sbom_str, signature=sig, cert=cert, prov=prov))
+
+    if getattr(args, "evidence", None):
+        entries = [e for r in results for e in r.evidence]
+        b = evmod.bundle(entries, keyless=not key)
+        path = args.evidence
+        if path.endswith("/") or os.path.isdir(path):
+            os.makedirs(path, exist_ok=True)
+            path = os.path.join(path, "evidence.json")
+        with open(path, "w") as f:
+            json.dump(b, f, indent=2)
+        print(c(f"  wrote {path} · {b['signed']}/{b['artifacts']} artifact(s) signed", DIM))
+
+
+def _handle_triage_history(args, results) -> dict | None:
+    """Load the failure-fingerprint history (so the report can say 'known since …'),
+    then fold this run's clusters back in. Advisory — never changes pass/fail."""
+    import json
+
+    from . import triage as triagemod
+
+    path = getattr(args, "triage_history", None)
+    if not path:
+        return None
+    history = {}
+    if os.path.exists(path):
+        try:
+            history = json.load(open(path))
+        except (OSError, json.JSONDecodeError):
+            print(c(f"  ⚠ could not read triage history {path}", Y))
+    tag = os.environ.get("GITHUB_SHA", "")[:7] or "this-run"
+    updated = triagemod.merge_history(results, history, tag=tag)
+    try:
+        with open(path, "w") as f:
+            json.dump(updated, f, indent=2)
+    except OSError:
+        pass
+    return history
+
+
+def _write_reports(args, results, wall: float, triage_history=None) -> None:
     if getattr(args, "json", None):
         with open(args.json, "w") as f:
-            f.write(reportmod.to_json(results, wall))
+            f.write(reportmod.to_json(results, wall, triage_history))
         print(c(f"  wrote {args.json}", DIM))
     if getattr(args, "junit", None):
         with open(args.junit, "w") as f:
@@ -354,6 +468,14 @@ def _doctor_report(cfg) -> dict:
             warns.append("flash_max/ram_max set but no size_tool — size check may not run")
         if t.test_format and not t.test:
             warns.append("test_format set but no test command")
+        if t.vuln_gate and t.vuln_gate not in ("none", "kev", "high", "critical"):
+            problems.append(f"unknown vuln_gate '{t.vuln_gate}' (use kev, high, critical, or none)")
+        if t.vuln_gate and t.vuln_gate not in ("", "none") and not t.artifacts:
+            warns.append("vuln_gate set but no `artifacts:` to pull back — the gate has no binary to scan")
+        if t.vuln_gate == "kev":
+            warns.append("vuln_gate: kev needs --kev-catalog at run time, else it degrades to report-only")
+        if t.waivers and not t.vuln_gate:
+            warns.append("waivers set but no vuln_gate — nothing to waive")
         if problems:
             errors += 1
         targets.append({"id": t.id, "validate": t.validate, "ok": not problems,
@@ -432,6 +554,12 @@ def main(argv=None) -> int:
     pr.add_argument("--regression-pct", type=float, default=5.0, help="size growth %% that counts as a regression (default 5)")
     pr.add_argument("--changed-files", help="comma-separated changed files; run only targets whose paths match")
     pr.add_argument("--changed-since", help="git ref; run only targets whose paths match files changed since it")
+    pr.add_argument("--sbom", action="store_true", help="generate a CycloneDX SBOM (syft) per green artifact")
+    pr.add_argument("--sign", action="store_true", help="cosign-sign each green artifact (keyless unless --cosign-key)")
+    pr.add_argument("--cosign-key", help="cosign key for signing (default: keyless OIDC — Fulcio + Rekor)")
+    pr.add_argument("--evidence", help="write a signed evidence bundle (SBOM + signature + SLSA provenance) here")
+    pr.add_argument("--kev-catalog", help="CISA KEV catalog JSON, enabling the vuln gate's 'kev' policy")
+    pr.add_argument("--triage-history", help="JSON fingerprint history; marks failures known-vs-new across runs")
     pr.set_defaults(func=cmd_run)
 
     pt = sub.add_parser("targets", help="list configured targets")

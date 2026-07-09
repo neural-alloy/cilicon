@@ -47,9 +47,11 @@ class TargetResult:
     validate: Optional[StepResult] = None
     test: Optional[StepResult] = None
     size: Optional[StepResult] = None
+    vuln: Optional[StepResult] = None            # SBOM/CVE gate (post-run, host-side)
     sizes: dict = field(default_factory=dict)   # {text,data,bss,flash,ram,...}
     test_cases: list = field(default_factory=list)  # parsed Unity/TAP {name, ok}
     artifacts: list[str] = field(default_factory=list)
+    evidence: list = field(default_factory=list)  # per-artifact evidence entries (evidence.entry)
     error: str = ""
 
     @property
@@ -61,6 +63,8 @@ class TargetResult:
         if self.test is not None and not self.test.ok:
             return False
         if self.size is not None and not self.size.ok:
+            return False
+        if self.vuln is not None and not self.vuln.ok:
             return False
         return True
 
