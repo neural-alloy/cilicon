@@ -12,6 +12,18 @@ targets:
     artifact: build/perception
     expect: "perception: engine ok"
 
+  # --- ARM64 Linux SoC, FULL-SYSTEM BOOT (Jetson Thor) ---------------------
+  # Unlike the qemu-user target above, this boots a REAL arm64 Linux kernel and
+  # runs the (static) artifact as init — kernel + userspace, not a bare ELF load.
+  # `board: jetson-thor` resolves to the qemu_system_linux_aarch64 tier.
+  - id: jetson-thor/linux-boot
+    board: jetson-thor
+    build: aarch64-linux-gnu-gcc -static -O2 src/perception.c -o build/perception-arm64
+    artifact: build/perception-arm64
+    expect: "perception: engine ok"   # only printable once the kernel boots to init
+    boot_timeout: 120
+    artifacts: [build/perception-arm64]   # pull the ELF back so --attestation can hash its real bytes
+
   # --- Bare-metal MCU / RTOS (STM32/Zephyr-style firmware) -----------------
   - id: stm32h7/cortex-m
     base: debian:bookworm-slim
@@ -27,6 +39,7 @@ targets:
     size_tool: arm-none-eabi-size  # also prove it FITS the silicon, not just boots
     flash_max: 1M                  # text+data must fit flash  (overflow → red check)
     ram_max: 256K                  # data+bss must fit RAM
+    artifacts: [build/firmware.elf]   # pull back so --attestation can hash real bytes
 
   # --- ESP32 / FreeRTOS (Xtensa — a totally different toolchain world) ------
   - id: esp32/freertos

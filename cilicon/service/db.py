@@ -10,7 +10,7 @@ Tables are plain dicts here; the orchestrator and dashboard own their shapes.
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Optional
 
 import httpx
 
@@ -101,7 +101,7 @@ class Supabase:
         """Orgs whose GitHub login is in the set (the dashboard read-scope)."""
         if not logins:
             return []
-        quoted = ",".join('"' + l.replace('"', "") + '"' for l in logins)
+        quoted = ",".join('"' + login.replace('"', "") + '"' for login in logins)
         return self._select("orgs", params={
             "github_login": f"in.({quoted})", "select": "*", "order": "github_login.asc"})
 

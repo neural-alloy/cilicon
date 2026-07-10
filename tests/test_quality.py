@@ -1,11 +1,9 @@
 """Tests for the check-quality features: stronger judge, regression baseline,
 on-target test parsing, changed-path filtering, and doctor. All Modal-free."""
-import json
 import os
 import tempfile
 import types
 
-import pytest
 
 from cilicon import baseline, testparse, runner
 from cilicon.config import Target
@@ -13,7 +11,8 @@ from cilicon.runner import TargetResult, StepResult
 
 
 def _t(**kw):
-    kw.setdefault("id", "t"); kw.setdefault("build", "x")
+    kw.setdefault("id", "t")
+    kw.setdefault("build", "x")
     return Target(**kw)
 
 
@@ -158,8 +157,9 @@ def test_no_filter_runs_everything():
 # ---- feature 8: doctor -----------------------------------------------------
 
 def _load(yml):
-    from cilicon import config
-    d = tempfile.mkdtemp(); p = os.path.join(d, "cilicon.yml"); open(p, "w").write(yml)
+    d = tempfile.mkdtemp()
+    p = os.path.join(d, "cilicon.yml")
+    open(p, "w").write(yml)
     return p
 
 

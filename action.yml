@@ -4,7 +4,7 @@
 # Modal's cloud — then publish the matrix as a normal PR check (JUnit + a
 # Markdown summary). cilicon is a STEP inside your CI, not a CI platform.
 #
-#   - uses: RyanRana/cilicon@v1
+#   - uses: neural-alloy/cilicon@v1
 #     with:
 #       config: cilicon.yml
 #     env:

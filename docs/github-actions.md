@@ -46,7 +46,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: cilicon
-        uses: RyanRana/cilicon@v1
+        uses: neural-alloy/cilicon@v1
         with:
           config: cilicon.yml
         env:
@@ -99,7 +99,7 @@ The two Modal tokens are passed as `env:`, not inputs.
 
 ## This repo dogfoods its own action
 
-[`.github/workflows/cilicon.yml`](../.github/workflows/cilicon.yml) in this repo uses `uses: ./` (the action's local checkout) instead of `uses: RyanRana/cilicon@v1`. In your repo, use the pinned `RyanRana/cilicon@v1` form shown above.
+[`.github/workflows/cilicon.yml`](../.github/workflows/cilicon.yml) in this repo uses `uses: ./` (the action's local checkout) instead of `uses: neural-alloy/cilicon@v1`. In your repo, use the pinned `neural-alloy/cilicon@v1` form shown above.
 
 ## See also
 

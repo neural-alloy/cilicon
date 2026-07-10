@@ -12,7 +12,7 @@ check.** It's a step you add to your existing CI, not a new CI.
 
 ```yaml
 # .github/workflows/cilicon.yml
-- uses: RyanRana/cilicon@v1
+- uses: neural-alloy/cilicon@v1
   env:
     MODAL_TOKEN_ID:     ${{ secrets.MODAL_TOKEN_ID }}
     MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}

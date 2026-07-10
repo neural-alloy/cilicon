@@ -1,7 +1,7 @@
 # cilicon — build AND boot every target in cilicon.yml on every push / PR.
 #
 # This repo dogfoods its own action (uses: ./). In YOUR repo you'd write:
-#     uses: RyanRana/cilicon@v1
+#     uses: neural-alloy/cilicon@v1
 #
 # Setup (once): add two repo secrets from `modal token new`:
 #     MODAL_TOKEN_ID, MODAL_TOKEN_SECRET
@@ -23,7 +23,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: cilicon
-        uses: ./                 # in your repo: RyanRana/cilicon@v1
+        uses: ./                 # in your repo: neural-alloy/cilicon@v1
         with:
           config: cilicon.yml
         env:

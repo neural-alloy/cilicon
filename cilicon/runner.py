@@ -161,6 +161,13 @@ def _slice(out: str, begin: str, end: str) -> str:
     return "\n".join(keep)
 
 
+def _has_marker(out: str, name: str) -> bool:
+    """Was a bare marker line emitted? (Distinct from `_marker`, which returns the
+    key=value dict and is falsy for markers like `ARTIFACTS ok` that carry none.)"""
+    tag = _MK + name
+    return any(ln.startswith(tag) for ln in out.splitlines())
+
+
 def _marker(out: str, name: str) -> dict:
     for ln in out.splitlines():
         if ln.startswith(_MK + name):
@@ -273,9 +280,15 @@ def run_target(t: Target, project_dir: str, app, artifacts_dir: str = "") -> Tar
         if t.secrets:
             kwargs["secrets"] = [modal.Secret.from_name(s) for s in t.secrets]
 
-        sb = modal.Sandbox.create("bash", "-lc", _script(t), **kwargs)
-        sb.wait()
-        out = sb.stdout.read() or ""
+        # Keep the sandbox ALIVE (create idle, then exec) rather than run the
+        # script as the main process: the current filesystem pull-back API can
+        # only read a live container, and `Sandbox.open` was deprecated → raises.
+        # The script itself (markers, quieting, judge) is unchanged — we only
+        # change how it's launched and how the artifact is retrieved.
+        sb = modal.Sandbox.create(**kwargs)
+        proc = sb.exec("bash", "-lc", _script(t), timeout=t.timeout, workdir="/work")
+        proc.wait()
+        out = proc.stdout.read() or ""
 
         # build
         res.build = _phase_result(out, "BUILD", "build")
@@ -325,7 +338,7 @@ def run_target(t: Target, project_dir: str, app, artifacts_dir: str = "") -> Tar
                 res.test = StepResult("test", ok, traw.seconds, traw.output, detail)
 
         # pull artifacts back out (best-effort; never fails the target)
-        if t.artifacts and artifacts_dir and _marker(out, "ARTIFACTS"):
+        if t.artifacts and artifacts_dir and _has_marker(out, "ARTIFACTS"):
             res.artifacts = _fetch_artifacts(sb, t, artifacts_dir)
 
     except Exception as e:  # noqa: BLE001
@@ -339,14 +352,25 @@ def run_target(t: Target, project_dir: str, app, artifacts_dir: str = "") -> Tar
     return res
 
 
+def _copy_remote(sb, remote_path: str, local_path: str) -> None:
+    """Stream a file out of the (still-live) sandbox to disk. Prefer the current
+    `filesystem` API — `Sandbox.open` was deprecated 2026-03 and now RAISES; keep
+    the legacy path so pull-back still works on older modal."""
+    fs = getattr(sb, "filesystem", None)
+    if fs is not None and hasattr(fs, "copy_to_local"):
+        fs.copy_to_local(remote_path, local_path)
+        return
+    with sb.open(remote_path, "rb") as remote, open(local_path, "wb") as local:  # pragma: no cover
+        local.write(remote.read())
+
+
 def _fetch_artifacts(sb, t: Target, artifacts_dir: str) -> list[str]:
     import tarfile
     dest = os.path.join(artifacts_dir, t.slug)
     try:
         os.makedirs(dest, exist_ok=True)
         tgz = os.path.join(dest, "_artifacts.tgz")
-        with sb.open("/tmp/cilicon_artifacts.tgz", "rb") as remote, open(tgz, "wb") as local:
-            local.write(remote.read())
+        _copy_remote(sb, "/tmp/cilicon_artifacts.tgz", tgz)
         with tarfile.open(tgz) as tf:
             names = tf.getnames()
             tf.extractall(dest)

@@ -10,9 +10,15 @@ from . import presets as presetmod
 from . import report as reportmod
 from . import telemetry as telemetrymod
 from . import baseline as baselinemod
+from . import attest as attestmod
 from .runner import TargetResult, run_matrix
 
-G = "\033[32m"; R = "\033[31m"; Y = "\033[33m"; DIM = "\033[2m"; B = "\033[1m"; X = "\033[0m"
+G = "\033[32m"
+R = "\033[31m"
+Y = "\033[33m"
+DIM = "\033[2m"
+B = "\033[1m"
+X = "\033[0m"
 
 
 def _supports_color() -> bool:
@@ -52,6 +58,9 @@ def _row_cells(id_cell: str, build_cell: str, check_cell: str) -> str:
 
 def cmd_run(args) -> int:
     cfg = cfgmod.load(args.config)
+    # Validate the signing key BEFORE spinning up (paid) cloud containers — a
+    # missing key must fail fast, not after a full matrix has run.
+    signing_key = _attestation_preflight(args)
     targets = cfg.targets if not args.target else [cfg.get(args.target)]
     targets = [t for t in targets if t]
     if not targets:
@@ -128,8 +137,62 @@ def cmd_run(args) -> int:
 
     regressed = _handle_baseline(args, results)
     _write_reports(args, results, wall)
+    _write_attestation(args, results, signing_key)
     failed = passed != len(results) or (regressed and getattr(args, "fail_on_regression", False))
     return 1 if failed else 0
+
+
+def _attestation_preflight(args):
+    """Resolve the signing key up front when --attestation was requested, so a
+    missing/bad key aborts before any cloud spend. Returns the key or None."""
+    if not getattr(args, "attestation", None):
+        return None
+    if not getattr(args, "artifacts", None):
+        raise SystemExit(
+            "cilicon: --attestation needs --artifacts <dir> (the built binary must "
+            "be pulled back so its real bytes can be hashed and signed)"
+        )
+    import os
+    try:
+        return attestmod.load_signing_key(
+            getattr(args, "signing_key", None), os.environ.get("CILICON_SIGNING_KEY")
+        )
+    except (ValueError, OSError) as e:
+        raise SystemExit(f"cilicon: {e}")
+
+
+def _write_attestation(args, results, signing_key) -> None:
+    """Sign a DSSE boot-test attestation over the run and write the envelope. Only
+    reached once the key is known-good; a build with no pulled-back artifact bytes
+    is an honest error, never a silent empty claim."""
+    if not getattr(args, "attestation", None):
+        return
+    runner = f"cilicon/{_version()} qemu@modal"
+    try:
+        envelope = attestmod.make_attestation(results, signing_key, runner)
+    except ValueError as e:
+        raise SystemExit(f"cilicon: cannot attest — {e}")
+    import json
+    with open(args.attestation, "w") as f:
+        f.write(json.dumps(envelope, indent=2))
+    subj = len(json_loads_payload(envelope)["subject"])
+    print(c(f"  wrote {args.attestation}  ({subj} artifact digest(s), SELF_ATTESTED)", DIM))
+
+
+def json_loads_payload(envelope) -> dict:
+    """Decode a DSSE envelope's in-toto statement (for display only — verification
+    uses the raw payload bytes, never this)."""
+    import base64
+    import json
+    return json.loads(base64.b64decode(envelope["payload"]))
+
+
+def _version() -> str:
+    try:
+        from importlib.metadata import version
+        return version("cilicon")
+    except Exception:
+        return "0"
 
 
 def _changed_files(args) -> list[str] | None:
@@ -143,7 +206,7 @@ def _changed_files(args) -> list[str] | None:
             out = subprocess.run(
                 ["git", "diff", "--name-only", args.changed_since],
                 capture_output=True, text=True, check=True).stdout
-            return [l.strip() for l in out.splitlines() if l.strip()]
+            return [ln.strip() for ln in out.splitlines() if ln.strip()]
         except Exception as e:  # noqa: BLE001
             print(c(f"  could not compute changed files ({e}); running all targets", DIM))
             return None
@@ -323,7 +386,8 @@ def cmd_boards(args) -> int:
         for n in names:
             mark = c(n, DIM) if n in user else n
             if len(line) + len(n) > 76:
-                print(line); line = "    "
+                print(line)
+                line = "    "
             line += mark + "  "
         if line.strip():
             print(line)
@@ -413,6 +477,33 @@ def cmd_gpus(args) -> int:
     return 0
 
 
+def cmd_verify_attestation(args) -> int:
+    """Independently check a DSSE boot-test envelope against a public key — so a
+    human (and our e2e) can confirm the signature without trusting the writer."""
+    import json
+    try:
+        with open(args.envelope) as f:
+            envelope = json.load(f)
+        pub = attestmod.load_public_key(args.key)
+    except Exception as e:  # noqa: BLE001
+        print(c(f"  ✗ {type(e).__name__}: {e}", R))
+        return 1
+    ok, why = attestmod.verify_envelope(envelope, pub)
+    if not ok:
+        print(c(f"  ✗ attestation INVALID — {why}", R))
+        return 1
+    stmt = json_loads_payload(envelope)
+    pred = stmt.get("predicate", {})
+    print(c(f"  ✓ signature verifies (keyid {envelope['signatures'][0]['keyid'][:16]}…)", G))
+    print(c(f"    assurance: {pred.get('assurance')}  ·  runner: {pred.get('runner')}", DIM))
+    for s in stmt.get("subject", []):
+        print(c(f"    subject: {s['name']}  sha256:{s['digest']['sha256']}", DIM))
+    for rb in pred.get("results", []):
+        mark = c("✓", G) if rb.get("passed") else c("✗", R)
+        print(f"    {mark} {rb['target']}  [{rb['fidelity']}]  {rb['terminating_event']}  {rb['boot_ms']}ms")
+    return 0
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(prog="cilicon", description="CI for real hardware — without touching metal.")
     p.add_argument("-c", "--config", default="cilicon.yml", help="path to cilicon.yml")
@@ -432,6 +523,8 @@ def main(argv=None) -> int:
     pr.add_argument("--regression-pct", type=float, default=5.0, help="size growth %% that counts as a regression (default 5)")
     pr.add_argument("--changed-files", help="comma-separated changed files; run only targets whose paths match")
     pr.add_argument("--changed-since", help="git ref; run only targets whose paths match files changed since it")
+    pr.add_argument("--attestation", help="write a signed DSSE boot-test attestation (in-toto) to this path")
+    pr.add_argument("--signing-key", help="Ed25519 key file (PKCS8 PEM/DER or 32-byte raw seed); or set CILICON_SIGNING_KEY")
     pr.set_defaults(func=cmd_run)
 
     pt = sub.add_parser("targets", help="list configured targets")
@@ -454,6 +547,11 @@ def main(argv=None) -> int:
     pd.add_argument("--json", action="store_true", help="emit the doctor report as JSON")
     pd.set_defaults(func=cmd_doctor)
 
+    pva = sub.add_parser("verify-attestation", help="verify a signed DSSE boot-test attestation")
+    pva.add_argument("envelope", help="path to the DSSE envelope JSON written by `run --attestation`")
+    pva.add_argument("--key", required=True, help="Ed25519 public key (raw/PEM/DER) to verify against")
+    pva.set_defaults(func=cmd_verify_attestation)
+
     args = p.parse_args(argv)
     if not args.cmd:
         # bare `cilicon` == `cilicon run`
@@ -463,6 +561,7 @@ def main(argv=None) -> int:
         args.baseline = args.update_baseline = args.changed_files = args.changed_since = None
         args.fail_on_regression = False
         args.regression_pct = 5.0
+        args.attestation = args.signing_key = None
         return cmd_run(args)
     return args.func(args)
 

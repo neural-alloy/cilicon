@@ -5,9 +5,14 @@ or define your own under `boards:` in cilicon.yml.
 
 Honest about fidelity (so a green check means what it says):
   • Cortex-M / bare-metal entries map to a QEMU `-M <machine>` that boots directly.
-  • ARM/RISC-V *Linux SoC* entries all resolve to qemu-user — you cross-build a
-    Linux ELF and it runs under qemu-arm/aarch64/riscv64. The name is branding +
-    the right toolchain; the SoC's specific peripherals aren't modeled.
+  • ARM64 *Linux SoC* entries (Jetson/i.MX8/Graviton/…) resolve to
+    qemu_system_linux_aarch64 — a REAL arm64 kernel boots and runs your static
+    ELF as init (full-system boot). It's the generic `virt` machine + a stock
+    kernel, so the SoC's specific peripherals still aren't modeled — but it is a
+    boot, not a bare loader. Want only the ELF-load check? set
+    `validate: qemu_user_aarch64` on the target.
+  • ARM 32-bit / RISC-V *Linux SoC* entries resolve to qemu-user — you cross-build
+    a Linux ELF and it runs under qemu-arm/riscv64 (loads, reaches main; no kernel).
   • `renode-*` entries use Renode (peripheral-accurate) and need a `.resc` —
     they point `renode_script` at renode/<name>.resc (bring your own, see
     examples/renode/). They run on the antmicro/renode image.
@@ -36,10 +41,17 @@ def _armhf() -> dict:
                 validate="qemu_user", qemu_bin="qemu-arm")
 
 
-def _arm64() -> dict:
+def _arm64_boot() -> dict:
+    """Full-system ARM64 Linux boot: cross-build a STATIC aarch64 ELF, then boot
+    a real Debian arm64 kernel under qemu-system-aarch64 with the ELF as init.
+    The `qemu-system-arm` package ships qemu-system-aarch64; cpio/gzip build the
+    initramfs. This is the Linux-userspace analogue of the Cortex-M boot — where
+    qemu_user_aarch64 only loads the ELF, this proves it survives a kernel boot.
+    (`board: <soc>` → `validate: qemu_user_aarch64` remains an explicit ELF-only
+    opt-out.)"""
     return dict(base="debian:bookworm-slim",
-                apt=["gcc-aarch64-linux-gnu", "qemu-user"],
-                validate="qemu_user_aarch64", qemu_bin="qemu-aarch64")
+                apt=["gcc-aarch64-linux-gnu", "qemu-system-arm", "cpio", "gzip"],
+                validate="qemu_system_linux_aarch64", machine="virt")
 
 
 def _rv64() -> dict:
@@ -96,7 +108,8 @@ for _name in [
 ]:
     BOARDS[_name] = _armhf()
 
-# ARM64 Linux SoCs — cross-built aarch64 Linux userspace under qemu-aarch64
+# ARM64 Linux SoCs — a REAL arm64 kernel boots the static artifact as init
+# (full-system boot, not a bare ELF load). `boot` means boot for these SoCs.
 for _name in [
     "rpi-3", "rpi-4", "rpi-5", "jetson-nano", "jetson-tx2", "jetson-xavier",
     "jetson-orin", "jetson-thor", "jetson-agx-thor",
@@ -105,7 +118,7 @@ for _name in [
     "amlogic-s905", "allwinner-a64", "marvell-armada-8040", "ampere-altra",
     "aws-graviton2", "aws-graviton3", "broadcom-bcm2712", "ti-am62", "nxp-ls1046a",
 ]:
-    BOARDS[_name] = _arm64()
+    BOARDS[_name] = _arm64_boot()
 
 # RISC-V — bare-metal (qemu-system) and Linux userspace (qemu-user)
 for _name, _m in {

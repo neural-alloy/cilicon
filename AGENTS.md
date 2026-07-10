@@ -46,6 +46,10 @@ cilicon run -t <id>         # one target only
   tail, sizes, artifacts. Schema lives in `cilicon/report.py:to_json`.
 - `cilicon run --junit <path>` — JUnit XML; drops into any CI dashboard.
 - `cilicon run --summary <path>` — GitHub-flavoured Markdown (point at `$GITHUB_STEP_SUMMARY`).
+- `cilicon run --attestation <path> --signing-key <ed25519>` — a **signed** DSSE
+  boot-test claim (in-toto Statement) binding sha256 of the real built bytes to the
+  outcome; `cilicon verify-attestation <path> --key <pub>` checks it. The one crypto
+  act in the free tier — it signs, it doesn't diagnose. See `docs/attestation.md`.
 - Exit codes: `0` all passed · `1` a target failed · `2` `--target` matched nothing.
 
 ## Code map

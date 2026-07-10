@@ -12,6 +12,21 @@ from __future__ import annotations
 import json
 from xml.sax.saxutils import escape, quoteattr
 
+from . import presets
+
+# The machine-readable contract the monorepo's CI step consumes. Bump on any
+# breaking change to the shape below. → docs/results-schema.md.
+RESULTS_SCHEMA = "cilicon.results/v1"
+
+
+def output_tail(step, n: int = 12) -> str:
+    """The last `n` lines of a phase's console, verbatim. Shared source of truth:
+    the JSON `output_tail` and the attestation's `console_sha256` hash THIS, so a
+    consumer can recompute the digest from the reported tail."""
+    if step is None:
+        return ""
+    return "\n".join(step.output.strip().splitlines()[-n:])
+
 
 def _step_dict(step) -> dict | None:
     if step is None:
@@ -20,12 +35,13 @@ def _step_dict(step) -> dict | None:
         "ok": step.ok,
         "seconds": round(step.seconds, 3),
         "detail": step.detail,
-        "output_tail": "\n".join(step.output.strip().splitlines()[-12:]),
+        "output_tail": output_tail(step),
     }
 
 
 def to_json(results, wall_seconds: float) -> str:
     payload = {
+        "schema": RESULTS_SCHEMA,
         "tool": "cilicon",
         "passed": sum(1 for r in results if r.ok),
         "total": len(results),
@@ -34,6 +50,9 @@ def to_json(results, wall_seconds: float) -> str:
             {
                 "id": r.target.id,
                 "validate": r.target.validate,
+                # WHAT RAN, from the tier alone — an ELF load is never a boot,
+                # a boot is never silicon. → docs/results-schema.md, WEDGE §0.2.
+                "fidelity": presets.fidelity_of(r.target),
                 "ok": r.ok,
                 "seconds": round(r.seconds, 3),
                 "error": r.error,

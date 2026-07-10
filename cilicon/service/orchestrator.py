@@ -153,7 +153,9 @@ def execute_run(run_id: str, e: github.Event) -> None:
 def _clone(app: github.GitHubApp, e: github.Event, dest: str) -> None:
     """Fetch the exact commit (works for PR head shas, not just branch tips)."""
     url = app.clone_url(e.installation_id, e.full_name)
-    run = lambda *c: subprocess.run(c, cwd=dest, check=True, capture_output=True)
+    def run(*c):
+        return subprocess.run(c, cwd=dest, check=True, capture_output=True)
+
     run("git", "init", "-q")
     run("git", "remote", "add", "origin", url)
     try:

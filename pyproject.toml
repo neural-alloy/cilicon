@@ -1,6 +1,6 @@
 [project]
 name = "cilicon"
-version = "0.1.0"
+version = "0.1.2"
 description = "CI that proves your code runs where it ships — build AND boot across every chip, arch, and GPU you target, in parallel, owning zero hardware."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -27,12 +27,14 @@ classifiers = [
 dependencies = [
     "modal>=1.0",
     "pyyaml>=6.0",
+    # Ed25519 sign/verify for `run --attestation` — the free tier's one crypto act.
+    "cryptography>=42",
 ]
 
 [project.urls]
-Homepage = "https://github.com/RyanRana/cilicon"
-Repository = "https://github.com/RyanRana/cilicon"
-Issues = "https://github.com/RyanRana/cilicon/issues"
+Homepage = "https://github.com/neural-alloy/cilicon"
+Repository = "https://github.com/neural-alloy/cilicon"
+Issues = "https://github.com/neural-alloy/cilicon/issues"
 
 [project.optional-dependencies]
 # the optional reference dashboard (not the product): GitHub App + Supabase

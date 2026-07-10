@@ -20,7 +20,6 @@ import difflib
 import json
 import re
 from dataclasses import dataclass
-from typing import Optional
 
 
 # ---- normalize a boot log so diffs are meaningful, not noise ---------------

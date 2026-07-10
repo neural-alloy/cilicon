@@ -46,3 +46,12 @@ def test_judge_user_tier_catches_crash():
     t = Target(id="m", build="make", validate="qemu_user", expect=["ok"])
     j = runner._judge(t, 139, "starting up")
     assert not j.ok and "SIGSEGV" in j.detail
+
+
+def test_has_marker_detects_valueless_markers():
+    # `ARTIFACTS ok` carries no key=value, so _marker returns a falsy {} — the
+    # artifact-fetch guard must use _has_marker (presence), not that dict.
+    out = "\n".join(["::cilicon::BUILD_END rc=0 ms=5", "::cilicon::ARTIFACTS ok"])
+    assert runner._marker(out, "ARTIFACTS") == {}          # falsy — the old bug
+    assert runner._has_marker(out, "ARTIFACTS") is True     # the fix
+    assert runner._has_marker(out, "ARTIFACTS") and not runner._has_marker("", "ARTIFACTS")

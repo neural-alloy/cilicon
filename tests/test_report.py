@@ -49,6 +49,31 @@ def test_json_includes_sizes():
     assert payload["passed"] == 1
 
 
+def test_json_carries_schema_and_per_target_fidelity():
+    import json
+    # a qemu_system target (full-system boot) and a qemu_user target (ELF load)
+    boot = _passing()                          # validate="qemu_system"
+    elf = _failing()                           # validate="qemu_user"
+    payload = json.loads(report.to_json([boot, elf], 5.0))
+    assert payload["schema"] == report.RESULTS_SCHEMA == "cilicon.results/v1"
+    # the rest of the shape is unchanged
+    assert payload["tool"] == "cilicon" and "wall_seconds" in payload
+    by_id = {t["id"]: t for t in payload["targets"]}
+    assert by_id["stm32/cortex-m"]["fidelity"] == "FULL_SYSTEM_BOOT"
+    assert by_id["pi/linux-arm"]["fidelity"] == "ELF_LOAD"
+
+
+def test_json_marks_the_linux_boot_tier_as_full_system_boot():
+    import json
+    from cilicon.config import Target
+    t = Target(id="jetson/boot", build="make", validate="qemu_system_linux_aarch64")
+    r = TargetResult(target=t, build=StepResult("build", True, 1.0, "ok"),
+                     validate=StepResult("validate", True, 3.2, "perception: engine ok",
+                                         "boots, reaches main ('perception: engine ok')"))
+    payload = json.loads(report.to_json([r], 5.0))
+    assert payload["targets"][0]["fidelity"] == "FULL_SYSTEM_BOOT"
+
+
 def test_junit_failure_names_real_culprit():
     xml = report.to_junit([_failing()], 5.0)
     assert 'failures="1"' in xml

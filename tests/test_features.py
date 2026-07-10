@@ -66,12 +66,54 @@ def test_cuda_board_selects_real_gpu():
     assert b["validate"] == "real_gpu" and b["gpu"] == "T4"
 
 
-def test_jetson_thor_is_aarch64_linux():
-    # Thor is an aarch64 Linux SoC — cross-built userspace under qemu-aarch64,
-    # same tier as the other Jetsons. (The reference board for Carbonium fleets.)
-    for name in ("jetson-thor", "jetson-agx-thor"):
+def test_jetson_thor_full_system_boots():
+    # Thor is an aarch64 Linux SoC — it now maps to the FULL-SYSTEM boot tier: a
+    # real arm64 kernel boots the static artifact as init, not a bare ELF load.
+    # (The reference board for the fleet — `boot` must mean boot for it.)
+    for name in ("jetson-thor", "jetson-agx-thor", "rpi-5", "imx8mp", "aws-graviton3"):
         b = presets.BOARDS[name]
-        assert b["validate"] == "qemu_user_aarch64" and b["qemu_bin"] == "qemu-aarch64"
+        assert b["validate"] == "qemu_system_linux_aarch64"
+        p = presets.PRESETS[b["validate"]]
+        assert p.full_system is True
+        assert p.fidelity == presets.FULL_SYSTEM_BOOT
+        # qemu-system-aarch64 (from qemu-system-arm) + initramfs tooling in the image
+        assert "qemu-system-arm" in b["apt"] and "cpio" in b["apt"]
+
+
+def test_qemu_user_aarch64_still_available_as_elf_opt_out():
+    # The ELF-only check stays reachable for anyone who explicitly wants it.
+    t = _t(validate="qemu_user_aarch64", artifact="build/x")
+    r = presets.resolve(t)
+    assert r.fidelity == presets.ELF_LOAD and r.full_system is False
+
+
+def test_fidelity_is_from_tier_not_user_config():
+    # `full_system: true` in yaml may skip the clean-exit check, but it cannot
+    # promote an ELF load to a boot — fidelity is the tier's alone (§0.2).
+    t = _t(validate="qemu_user_aarch64", artifact="build/x", full_system=True)
+    assert presets.resolve(t).fidelity == presets.ELF_LOAD
+    assert presets.fidelity_of(t) == presets.ELF_LOAD
+
+
+def test_linux_aarch64_boot_tier_resolves_with_static_elf():
+    t = _t(validate="qemu_system_linux_aarch64", artifact="build/app", machine="virt",
+           boot_timeout=120)
+    r = presets.resolve(t)
+    assert r.full_system is True and r.fidelity == presets.FULL_SYSTEM_BOOT
+    # the real kernel boot, keyed on the artifact + machine + timeout
+    assert "qemu-system-aarch64" in r.cmd
+    assert "rdinit=/init" in r.cmd and "build/app" in r.cmd
+    assert "-M virt" in r.cmd and "timeout 120" in r.cmd
+
+
+def test_fidelity_of_covers_the_axis():
+    assert presets.fidelity_of(_t(validate="native")) == presets.ELF_LOAD
+    assert presets.fidelity_of(_t(validate="qemu_user")) == presets.ELF_LOAD
+    assert presets.fidelity_of(_t(validate="qemu_system")) == presets.FULL_SYSTEM_BOOT
+    assert presets.fidelity_of(_t(validate="renode")) == presets.FULL_SYSTEM_BOOT
+    assert presets.fidelity_of(_t(validate="real_gpu")) == presets.REAL_HARDWARE
+    # unknown/custom stays conservative — never an unprovable boot
+    assert presets.fidelity_of(_t(validate="custom")) == presets.ELF_LOAD
 
 
 def test_real_gpu_field_overrides_default_and_supports_count():
@@ -82,9 +124,11 @@ def test_real_gpu_field_overrides_default_and_supports_count():
 # ---- user-defined boards ---------------------------------------------------
 
 def _load_yml(yml: str):
-    import tempfile, os
+    import tempfile
+    import os
     from cilicon import config
-    d = tempfile.mkdtemp(); p = os.path.join(d, "cilicon.yml")
+    d = tempfile.mkdtemp()
+    p = os.path.join(d, "cilicon.yml")
     open(p, "w").write(yml)
     return config.load(p)
 
@@ -136,11 +180,13 @@ def test_every_catalog_board_loads_and_resolves():
     """Every built-in board must produce a valid Target + resolvable command
     through the real config pipeline (catches a typo'd field or tier)."""
     from cilicon import presets, config
-    import tempfile, os
+    import tempfile
+    import os
     for name, b in presets.BOARDS.items():
         yml = (f"targets:\n  - id: t\n    board: {name}\n"
                f"    build: \"true\"\n    artifact: a.bin\n    expect: \"X\"\n")
-        d = tempfile.mkdtemp(); p = os.path.join(d, "cilicon.yml")
+        d = tempfile.mkdtemp()
+        p = os.path.join(d, "cilicon.yml")
         open(p, "w").write(yml)
         cfg = config.load(p)              # must not SystemExit
         presets.resolve(cfg.targets[0])   # must not raise
@@ -203,9 +249,11 @@ def test_jsonl_sink_writes_one_object_per_line():
     d = tempfile.mkdtemp()
     path = os.path.join(d, "sub", "events.jsonl")  # dir auto-created
     sink = telemetry.JsonlSink(path)
-    sink.emit({"event": "a"}); sink.emit({"event": "b"}); sink.close()
+    sink.emit({"event": "a"})
+    sink.emit({"event": "b"})
+    sink.close()
     lines = open(path).read().strip().splitlines()
-    assert [json.loads(l)["event"] for l in lines] == ["a", "b"]
+    assert [json.loads(ln)["event"] for ln in lines] == ["a", "b"]
 
 
 def test_recorder_full_lifecycle_to_jsonl():
@@ -217,7 +265,7 @@ def test_recorder_full_lifecycle_to_jsonl():
     rec.target_completed(_result(True))
     rec.run_completed([_result(True), _result(False)], 5.0)
     rec.close()
-    events = [json.loads(l) for l in open(path)]
+    events = [json.loads(ln) for ln in open(path)]
     kinds = [e["event"] for e in events]
     assert kinds == ["run.started", "target.started", "target.completed", "run.completed"]
     assert all(e["run_id"] == "run_fixed" for e in events)
@@ -259,7 +307,8 @@ def _matrix_result(arch, opt, ok):
 
 
 def test_matrix_values_preserved_through_expansion():
-    import tempfile, os
+    import tempfile
+    import os
     yml = (
         "targets:\n"
         "  - id: node-{arch}\n"
@@ -267,7 +316,9 @@ def test_matrix_values_preserved_through_expansion():
         "    build: \"echo {arch}\"\n"
         "    validate: native\n"
     )
-    d = tempfile.mkdtemp(); p = os.path.join(d, "cilicon.yml"); open(p, "w").write(yml)
+    d = tempfile.mkdtemp()
+    p = os.path.join(d, "cilicon.yml")
+    open(p, "w").write(yml)
     cfg = __import__("cilicon.config", fromlist=["load"]).load(p)
     assert [t.matrix_values for t in cfg.targets] == [{"arch": "arm"}, {"arch": "riscv64"}]
 
@@ -281,7 +332,7 @@ def test_two_axis_grid_marks_the_failing_cell():
     md = report.to_markdown(results, 1.0)
     assert "Fan-out sweep" in md and "sweep: `arch` × `opt`" in md
     # the riscv64 row has one pass and one fail
-    row = [l for l in md.splitlines() if l.startswith("| riscv64 ")][0]
+    row = [ln for ln in md.splitlines() if ln.startswith("| riscv64 ")][0]
     assert row.count("✅") == 1 and row.count("❌") == 1
 
 
@@ -298,6 +349,7 @@ def test_one_axis_grid_is_a_single_row():
 def test_no_grid_when_no_matrix():
     from cilicon import report
     t = Target(id="plain", build="x", validate="native")
-    r = TargetResult(target=t); r.build = StepResult("build", True, 0.1, "", "ok")
+    r = TargetResult(target=t)
+    r.build = StepResult("build", True, 0.1, "", "ok")
     r.validate = StepResult("validate", True, 0.1, "", "runs")
     assert "Fan-out sweep" not in report.to_markdown([r], 1.0)
