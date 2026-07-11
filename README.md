@@ -1,17 +1,12 @@
 <div align="center">
 
-<img src="assets/neural-alloy.png" alt="Neural Alloy" width="150" />
+<img src="assets/neural-alloy.png" alt="Neural Alloy" width="140" />
 
 # cilicon
 
-**CI for real hardware.** Build _and_ **boot** your code on every chip you ship to — in parallel, owning zero hardware.
+**CI for real hardware** — build _and_ **boot** your code on every chip you ship to, in parallel, owning zero hardware.
 
-[**Get started &rarr;**](https://github.com/apps/cilicon-action/installations/new) &nbsp;·&nbsp; [Docs](https://neuralalloy.io/cilicon/docs.html) &nbsp;·&nbsp; [Marketplace](https://github.com/marketplace/actions/cilicon-action)
-
-[![GitHub Marketplace](https://img.shields.io/badge/GitHub-Marketplace-2ea44f?logo=github&logoColor=white)](https://github.com/marketplace/actions/cilicon-action)
-[![License: MIT](https://img.shields.io/badge/License-MIT-111.svg)](LICENSE)
-
-<sub>A <a href="https://neuralalloy.io"><b>Neural Alloy</b></a> product — software for hardware.</sub>
+[**Get started**](https://github.com/apps/cilicon-action/installations/new)&nbsp;&nbsp;·&nbsp;&nbsp;[Docs](https://neuralalloy.io/cilicon/docs.html)&nbsp;&nbsp;·&nbsp;&nbsp;[Neural Alloy](https://neuralalloy.io)
 
 </div>
 
