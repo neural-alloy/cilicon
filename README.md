@@ -6,7 +6,7 @@
 
 **CI for real hardware** — build _and_ **boot** your code on every chip you ship to, in parallel, owning zero hardware.
 
-[**Get started**](https://github.com/apps/cilicon-action/installations/new)&nbsp;&nbsp;·&nbsp;&nbsp;[Docs](https://neuralalloy.io/cilicon/docs.html)&nbsp;&nbsp;·&nbsp;&nbsp;[Neural Alloy](https://neuralalloy.io)
+[**Get started**](https://github.com/marketplace/actions/cilicon-action)&nbsp;&nbsp;·&nbsp;&nbsp;[Docs](https://neuralalloy.io/cilicon/docs.html)&nbsp;&nbsp;·&nbsp;&nbsp;[Neural Alloy](https://neuralalloy.io)
 
 </div>
 
