@@ -13,11 +13,10 @@ Endpoints:
 """
 from __future__ import annotations
 
-import threading
 from pathlib import Path
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -29,6 +28,19 @@ _HERE = Path(__file__).parent
 templates = Jinja2Templates(directory=str(_HERE / "templates"))
 
 app = FastAPI(title="cilicon", docs_url=None, redoc_url=None)
+
+
+@app.on_event("startup")
+def _init() -> None:
+    # Create the ClickHouse database + tables on boot (idempotent). Skipped when
+    # ClickHouse isn't configured yet, so the app still imports in tests.
+    from .db import init_schema
+    if settings().configured:
+        try:
+            init_schema()
+        except Exception as e:  # a store hiccup must not crash boot; routes will surface it
+            import logging
+            logging.getLogger("cilicon").warning("schema init deferred: %s", e)
 _static = _HERE / "static"
 if _static.exists():
     app.mount("/static", StaticFiles(directory=str(_static)), name="static")
@@ -38,7 +50,7 @@ if _static.exists():
 
 @app.post("/webhook/github")
 async def webhook(request: Request, background: BackgroundTasks):
-    require("supabase", "github_app")
+    require("clickhouse", "github_app")
     body = await request.body()
     sig = request.headers.get("X-Hub-Signature-256", "")
     if not github.verify_signature(settings().gh_webhook_secret, body, sig):
@@ -54,9 +66,7 @@ async def webhook(request: Request, background: BackgroundTasks):
         # heavy work (clone + matrix) off the request path so GitHub's delivery
         # doesn't time out. A single worker thread per run; a production
         # deployment would hand this to a real queue.
-        threading.Thread(
-            target=orchestrator.execute_run, args=(run_id, event), daemon=True
-        ).start()
+        orchestrator.dispatch(run_id, event)
         return {"ok": True, "run_id": run_id}
     return {"ok": True}
 
@@ -176,20 +186,35 @@ def run_status(request: Request, run_id: str):
 def download(request: Request, kind: str, target_result_id: str):
     user = _require_user(request)
     d = db()
-    rows = d._select("target_results",
-                     params={"id": f"eq.{target_result_id}", "select": "*,runs(project_id)"})
-    if not rows:
+    tr = d.target_result(target_result_id)
+    if not tr:
         raise HTTPException(404)
-    tr = rows[0]
-    _authz(user, d.get_project(tr["runs"]["project_id"]))
+    run = d.get_run(tr.get("run_id", ""))
+    _authz(user, d.get_project(run["project_id"]) if run else None)
     s = settings()
     if kind == "log" and tr.get("log_path"):
-        url = d.signed_url(s.log_bucket, tr["log_path"])
+        bucket, path = s.log_bucket, tr["log_path"]
     elif kind == "artifact" and tr.get("artifact_path"):
-        url = d.signed_url(s.artifact_bucket, tr["artifact_path"])
+        bucket, path = s.artifact_bucket, tr["artifact_path"]
     else:
         raise HTTPException(404, "no such file")
-    return RedirectResponse(url)
+    blob = d.get_blob(bucket, path)
+    if not blob:
+        raise HTTPException(404, "no such file")
+    data, ctype = blob
+    return Response(content=data, media_type=ctype)
+
+
+# Blobs are served from ClickHouse (no object store / signed URLs). signed_url()
+# returns a /dl/blob/<bucket>/<path> pointer that resolves here.
+@app.get("/dl/blob/{bucket}/{path:path}")
+def download_blob(request: Request, bucket: str, path: str):
+    _require_user(request)
+    blob = db().get_blob(bucket, path)
+    if not blob:
+        raise HTTPException(404, "no such file")
+    data, ctype = blob
+    return Response(content=data, media_type=ctype)
 
 
 @app.get("/healthz")

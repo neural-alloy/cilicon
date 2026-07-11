@@ -2,8 +2,8 @@
 
   * a GitHub App webhook that runs the matrix on every push / PR and reports
     back a single check-run (cilicon/service/github.py + orchestrator.py)
-  * persistence of every run, log, and artifact to Supabase
-    (cilicon/service/db.py over Supabase Postgres + Storage)
+  * persistence of every run, log, and artifact to ClickHouse
+    (cilicon/service/db.py over ClickHouse (HTTP))
   * a server-rendered dashboard with GitHub-OAuth login
     (cilicon/service/app.py + auth.py + templates/)
 

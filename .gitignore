@@ -1,30 +1,5 @@
-# Python
-__pycache__/
-*.py[cod]
-*.egg-info/
-.eggs/
+# build artifacts from `pip install .` / `uvx --from .`
 build/
 dist/
-.venv/
-venv/
-.mypy_cache/
-.pytest_cache/
-.ruff_cache/
-
-# cilicon outputs
-cilicon-artifacts/
-forge-artifacts/
-*.jsonl
-cilicon-results.xml
-out/
-.cilicon/
-
-# local env / secrets
-.env
-.env.*
-*.local
-
-# OS / editor
-.DS_Store
-.idea/
-.vscode/
+*.egg-info/
+__pycache__/

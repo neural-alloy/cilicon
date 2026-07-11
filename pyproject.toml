@@ -49,6 +49,7 @@ service = [
 ]
 dev = [
     "pytest>=8.0",
+    "ruff>=0.7",
 ]
 # expose cilicon to MCP-capable coding agents (cilicon-mcp)
 mcp = [

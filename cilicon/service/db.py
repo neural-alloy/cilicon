@@ -1,14 +1,25 @@
-"""cilicon persistence — a thin, synchronous client over Supabase's REST APIs.
+"""cilicon persistence — a thin, synchronous client over ClickHouse's HTTP API.
 
-We deliberately avoid the heavy supabase-py SDK: everything cilicon needs is a
-handful of PostgREST + Storage calls, and a small wrapper keeps the dependency
-surface (httpx only) tiny and the behaviour obvious. All calls use the SERVICE
-ROLE key and run server-side, so they bypass RLS (see migrations/0001_init.sql).
+Design: ClickHouse is append-optimized, so every mutable record is a
+`ReplacingMergeTree` keyed on its id with a monotonic `ver` (microsecond unix);
+an "update" is an insert of a new version and reads take the latest via `FINAL`.
+Each row carries its full JSON in a `doc` column plus a few extracted key columns
+for querying, so the service's flexible `**fields` records need no rigid schema.
 
-Tables are plain dicts here; the orchestrator and dashboard own their shapes.
+We deliberately avoid a heavy SDK: everything is a POST of SQL to the HTTP
+interface (the same lightweight approach the Supabase client used). Blobs (logs,
+artifacts) live in a `blobs` table and are served back by the service's /dl route.
+
+→ init the schema once with `init_schema()` (idempotent). Config: CLICKHOUSE_URL,
+  CLICKHOUSE_USER, CLICKHOUSE_PASSWORD, CLICKHOUSE_DATABASE (see settings.py).
 """
+
 from __future__ import annotations
 
+import base64
+import json
+import time
+import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -16,196 +27,266 @@ import httpx
 
 from .settings import settings
 
+# Deterministic-id namespace: upsert-by-natural-key tables derive a stable id
+# from the key (so re-upserting the same org/user/project keeps one id, which
+# ReplacingMergeTree then dedups on — a fresh uuid4 each time would not).
+_NS = uuid.UUID("c1110c00-0000-4000-8000-000000000001")
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-class Supabase:
+def _ver() -> int:
+    return time.time_ns() // 1000  # microsecond unix, monotonic enough per-write
+
+
+def _uid(*parts) -> str:
+    return str(uuid.uuid5(_NS, ":".join(str(p) for p in parts)))
+
+
+DDL = [
+    "CREATE DATABASE IF NOT EXISTS {db}",
+    # mutable records — ReplacingMergeTree(ver), read latest with FINAL
+    "CREATE TABLE IF NOT EXISTS {db}.orgs (id String, github_login String, doc String, ver UInt64)"
+    " ENGINE = ReplacingMergeTree(ver) ORDER BY id",
+    "CREATE TABLE IF NOT EXISTS {db}.users (id String, github_id Int64, doc String, ver UInt64)"
+    " ENGINE = ReplacingMergeTree(ver) ORDER BY id",
+    "CREATE TABLE IF NOT EXISTS {db}.memberships (org_id String, user_id String, doc String, ver UInt64)"
+    " ENGINE = ReplacingMergeTree(ver) ORDER BY (org_id, user_id)",
+    "CREATE TABLE IF NOT EXISTS {db}.installations (id Int64, doc String, ver UInt64)"
+    " ENGINE = ReplacingMergeTree(ver) ORDER BY id",
+    "CREATE TABLE IF NOT EXISTS {db}.projects (id String, github_repo_id Int64, org_id String, doc String, ver UInt64)"
+    " ENGINE = ReplacingMergeTree(ver) ORDER BY id",
+    "CREATE TABLE IF NOT EXISTS {db}.runs (id String, project_id String, status String, wall_seconds Float64,"
+    " created_at DateTime64(3), doc String, ver UInt64)"
+    " ENGINE = ReplacingMergeTree(ver) ORDER BY id",
+    # append-only
+    "CREATE TABLE IF NOT EXISTS {db}.target_results (id String, run_id String, target_id String,"
+    " doc String, created_at DateTime64(3) DEFAULT now64(3))"
+    " ENGINE = MergeTree ORDER BY (run_id, target_id)",
+    # blobs (logs + artifacts) — upsert on (bucket, path)
+    "CREATE TABLE IF NOT EXISTS {db}.blobs (bucket String, path String, content_type String, data String, ver UInt64)"
+    " ENGINE = ReplacingMergeTree(ver) ORDER BY (bucket, path)",
+]
+
+
+def _esc(v) -> str:
+    return str(v).replace("\\", "\\\\").replace("'", "\\'")
+
+
+class Store:
     def __init__(self) -> None:
         s = settings()
-        if not s.configured:
-            raise RuntimeError("Supabase not configured (SUPABASE_URL / SUPABASE_SERVICE_KEY)")
-        self._rest = f"{s.supabase_url}/rest/v1"
-        self._storage = f"{s.supabase_url}/storage/v1"
-        self._base = s.supabase_url
-        self._h = {
-            "apikey": s.supabase_service_key,
-            "Authorization": f"Bearer {s.supabase_service_key}",
-        }
-        self._c = httpx.Client(timeout=30.0, headers=self._h)
+        if not s.ch_url:
+            raise RuntimeError("ClickHouse not configured (CLICKHOUSE_URL)")
+        self._db = s.ch_database
+        self._url = s.ch_url.rstrip("/")
+        auth = (s.ch_user, s.ch_password) if s.ch_user else None
+        # No `database=` param: every table is fully qualified as {db}.table, so
+        # the connection stays on `default` and DDL (CREATE DATABASE) can't fail
+        # on "current database doesn't exist yet".
+        self._c = httpx.Client(timeout=60.0, auth=auth)
 
     def close(self) -> None:
         self._c.close()
 
-    # ── low-level PostgREST ──────────────────────────────────────────────
+    # ── low-level HTTP ───────────────────────────────────────────────────
 
-    def _select(self, table: str, *, params: dict) -> list[dict]:
-        r = self._c.get(f"{self._rest}/{table}", params=params)
-        r.raise_for_status()
-        return r.json()
+    def _exec(self, sql: str) -> str:
+        r = self._c.post(self._url, content=sql.encode())
+        if r.status_code >= 400:
+            raise RuntimeError(f"clickhouse: {r.status_code} {r.text[:300]}")
+        return r.text
 
-    def _insert(self, table: str, row: dict, *, upsert_on: str = "") -> dict:
-        headers = {"Prefer": "return=representation"}
-        params = {}
-        if upsert_on:
-            headers["Prefer"] = "return=representation,resolution=merge-duplicates"
-            params["on_conflict"] = upsert_on
-        r = self._c.post(f"{self._rest}/{table}", json=row, headers=headers, params=params)
-        r.raise_for_status()
-        data = r.json()
-        return data[0] if isinstance(data, list) else data
+    def _rows(self, sql: str) -> list[dict]:
+        """Run a SELECT and parse each JSONEachRow line to a dict."""
+        out = self._exec(sql + " FORMAT JSONEachRow").strip()
+        return [json.loads(ln) for ln in out.splitlines() if ln]
 
-    def _update(self, table: str, patch: dict, *, params: dict) -> dict:
-        params = {**params, "select": "*"}
-        r = self._c.patch(
-            f"{self._rest}/{table}", json=patch, params=params,
-            headers={"Prefer": "return=representation"},
-        )
-        r.raise_for_status()
-        data = r.json()
-        return data[0] if data else {}
+    def _docs(self, sql_select_doc: str) -> list[dict]:
+        """Run a `SELECT doc ...` and return the parsed docs."""
+        return [json.loads(r["doc"]) for r in self._rows(sql_select_doc)]
 
-    def _one(self, rows: list[dict]) -> Optional[dict]:
-        return rows[0] if rows else None
+    def _put(self, table: str, keycols: dict, doc: dict) -> dict:
+        """Insert one row: extracted keycols + the full doc + a fresh ver."""
+        row = {**keycols, "doc": json.dumps(doc), "ver": _ver()}
+        self._exec(f"INSERT INTO {self._db}.{table} FORMAT JSONEachRow\n{json.dumps(row)}")
+        return doc
 
-    # ── identity ─────────────────────────────────────────────────────────
+    # ── orgs / users / memberships ───────────────────────────────────────
 
     def upsert_org(self, github_login: str, name: str = "") -> dict:
-        return self._insert(
-            "orgs", {"github_login": github_login, "name": name or github_login},
-            upsert_on="github_login",
-        )
+        oid = _uid("org", github_login)
+        doc = {"id": oid, "github_login": github_login, "name": name or github_login,
+               "updated_at": _now()}
+        return self._put("orgs", {"id": oid, "github_login": github_login}, doc)
 
     def upsert_user(self, github_id: int, login: str, **extra) -> dict:
-        row = {"github_id": github_id, "login": login, **extra}
-        return self._insert("users", row, upsert_on="github_id")
+        uid = _uid("user", github_id)
+        doc = {"id": uid, "github_id": github_id, "login": login, "updated_at": _now(), **extra}
+        return self._put("users", {"id": uid, "github_id": github_id}, doc)
 
     def ensure_membership(self, org_id: str, user_id: str, role: str = "member") -> None:
-        self._insert(
-            "memberships", {"org_id": org_id, "user_id": user_id, "role": role},
-            upsert_on="org_id,user_id",
-        )
+        doc = {"org_id": org_id, "user_id": user_id, "role": role, "updated_at": _now()}
+        self._put("memberships", {"org_id": org_id, "user_id": user_id}, doc)
 
     def orgs_for_user(self, user_id: str) -> list[dict]:
-        rows = self._select(
-            "memberships",
-            params={"user_id": f"eq.{user_id}", "select": "role,orgs(*)"},
-        )
-        return [{**r["orgs"], "role": r["role"]} for r in rows if r.get("orgs")]
+        rows = self._rows(
+            f"SELECT doc FROM {self._db}.memberships FINAL WHERE user_id = '{_esc(user_id)}'")
+        out = []
+        for r in rows:
+            m = json.loads(r["doc"])
+            org = self.get_org(m["org_id"])
+            if org:
+                out.append({**org, "role": m.get("role", "member")})
+        return out
 
     def get_org(self, org_id: str) -> Optional[dict]:
-        return self._one(self._select("orgs", params={"id": f"eq.{org_id}", "select": "*"}))
+        d = self._docs(f"SELECT doc FROM {self._db}.orgs FINAL WHERE id = '{_esc(org_id)}'")
+        return d[0] if d else None
 
     def orgs_by_logins(self, logins: list[str]) -> list[dict]:
-        """Orgs whose GitHub login is in the set (the dashboard read-scope)."""
         if not logins:
             return []
-        quoted = ",".join('"' + login.replace('"', "") + '"' for login in logins)
-        return self._select("orgs", params={
-            "github_login": f"in.({quoted})", "select": "*", "order": "github_login.asc"})
+        inlist = ",".join("'" + _esc(x) + "'" for x in logins)
+        return self._docs(
+            f"SELECT doc FROM {self._db}.orgs FINAL WHERE github_login IN ({inlist})"
+            " ORDER BY github_login ASC")
 
     # ── installs + projects ──────────────────────────────────────────────
 
     def upsert_installation(self, inst_id: int, org_id: str, account_login: str,
                             account_type: str = "") -> dict:
-        return self._insert(
-            "installations",
-            {"id": inst_id, "org_id": org_id, "account_login": account_login,
-             "account_type": account_type},
-            upsert_on="id",
-        )
+        doc = {"id": inst_id, "org_id": org_id, "account_login": account_login,
+               "account_type": account_type, "updated_at": _now()}
+        return self._put("installations", {"id": inst_id}, doc)
 
     def upsert_project(self, *, org_id: str, github_repo_id: int, full_name: str,
                        installation_id: int, default_branch: str = "main",
                        private: bool = True) -> dict:
-        return self._insert(
-            "projects",
-            {"org_id": org_id, "github_repo_id": github_repo_id,
-             "full_name": full_name, "installation_id": installation_id,
-             "default_branch": default_branch, "private": private},
-            upsert_on="github_repo_id",
-        )
+        pid = _uid("project", github_repo_id)
+        doc = {"id": pid, "org_id": org_id, "github_repo_id": github_repo_id,
+               "full_name": full_name, "installation_id": installation_id,
+               "default_branch": default_branch, "private": private, "updated_at": _now()}
+        return self._put("projects",
+                         {"id": pid, "github_repo_id": github_repo_id, "org_id": org_id}, doc)
 
     def project_by_repo_id(self, github_repo_id: int) -> Optional[dict]:
-        return self._one(self._select(
-            "projects", params={"github_repo_id": f"eq.{github_repo_id}", "select": "*"}))
+        d = self._docs(
+            f"SELECT doc FROM {self._db}.projects FINAL WHERE github_repo_id = {int(github_repo_id)}")
+        return d[0] if d else None
 
     def get_project(self, project_id: str) -> Optional[dict]:
-        return self._one(self._select(
-            "projects", params={"id": f"eq.{project_id}", "select": "*"}))
+        d = self._docs(f"SELECT doc FROM {self._db}.projects FINAL WHERE id = '{_esc(project_id)}'")
+        return d[0] if d else None
 
     def projects_for_org(self, org_id: str) -> list[dict]:
-        return self._select(
-            "projects",
-            params={"org_id": f"eq.{org_id}", "select": "*", "order": "full_name.asc"})
+        return self._docs(
+            f"SELECT doc FROM {self._db}.projects FINAL WHERE org_id = '{_esc(org_id)}'"
+            " ORDER BY id ASC")
 
     # ── runs ─────────────────────────────────────────────────────────────
 
     def create_run(self, **fields) -> dict:
+        rid = fields.get("id") or str(uuid.uuid4())
+        fields["id"] = rid
         fields.setdefault("status", "queued")
-        return self._insert("runs", fields)
+        fields.setdefault("created_at", _now())
+        fields.setdefault("wall_seconds", 0)
+        return self._put(
+            "runs",
+            {"id": rid, "project_id": fields.get("project_id", ""), "status": fields["status"],
+             "wall_seconds": float(fields.get("wall_seconds") or 0), "created_at": fields["created_at"]},
+            fields)
 
     def update_run(self, run_id: str, **patch) -> dict:
-        return self._update("runs", patch, params={"id": f"eq.{run_id}"})
+        cur = self.get_run(run_id) or {"id": run_id, "created_at": _now()}
+        doc = {**cur, **patch, "updated_at": _now()}
+        return self._put(
+            "runs",
+            {"id": run_id, "project_id": doc.get("project_id", ""), "status": doc.get("status", ""),
+             "wall_seconds": float(doc.get("wall_seconds") or 0),
+             "created_at": doc.get("created_at") or _now()},
+            doc)
 
     def get_run(self, run_id: str) -> Optional[dict]:
-        return self._one(self._select("runs", params={"id": f"eq.{run_id}", "select": "*"}))
+        d = self._docs(f"SELECT doc FROM {self._db}.runs FINAL WHERE id = '{_esc(run_id)}'")
+        return d[0] if d else None
 
     def runs_for_project(self, project_id: str, limit: int = 50) -> list[dict]:
-        return self._select("runs", params={
-            "project_id": f"eq.{project_id}", "select": "*",
-            "order": "created_at.desc", "limit": str(limit)})
+        return self._docs(
+            f"SELECT doc FROM {self._db}.runs FINAL WHERE project_id = '{_esc(project_id)}'"
+            f" ORDER BY created_at DESC LIMIT {int(limit)}")
 
     def add_target_result(self, **fields) -> dict:
-        return self._insert("target_results", fields)
+        tid = fields.get("id") or str(uuid.uuid4())
+        fields["id"] = tid
+        return self._put(
+            "target_results",
+            {"id": tid, "run_id": fields.get("run_id", ""), "target_id": fields.get("target_id", "")},
+            fields)
 
     def target_results(self, run_id: str) -> list[dict]:
-        return self._select("target_results", params={
-            "run_id": f"eq.{run_id}", "select": "*", "order": "target_id.asc"})
+        return self._docs(
+            f"SELECT doc FROM {self._db}.target_results WHERE run_id = '{_esc(run_id)}'"
+            " ORDER BY target_id ASC")
+
+    def target_result(self, tr_id: str) -> Optional[dict]:
+        d = self._docs(
+            f"SELECT doc FROM {self._db}.target_results WHERE id = '{_esc(tr_id)}' LIMIT 1")
+        return d[0] if d else None
 
     # ── usage / quota ────────────────────────────────────────────────────
 
     def org_seconds_since(self, org_id: str, since_iso: str) -> float:
-        """Sum of run wall-seconds for an org's projects since a timestamp.
-        Used as a soft quota gate before scheduling on the platform Modal."""
         projs = self.projects_for_org(org_id)
         if not projs:
             return 0.0
-        ids = ",".join(p["id"] for p in projs)
-        rows = self._select("runs", params={
-            "project_id": f"in.({ids})", "created_at": f"gte.{since_iso}",
-            "select": "wall_seconds"})
-        return float(sum((r.get("wall_seconds") or 0) for r in rows))
+        inlist = ",".join("'" + _esc(p["id"]) + "'" for p in projs)
+        rows = self._rows(
+            f"SELECT sum(wall_seconds) AS s FROM {self._db}.runs FINAL"
+            f" WHERE project_id IN ({inlist})"
+            f" AND created_at >= parseDateTime64BestEffort('{_esc(since_iso)}')")
+        return float(rows[0].get("s") or 0) if rows else 0.0
 
     # ── Storage (logs + artifacts) ───────────────────────────────────────
 
     def upload(self, bucket: str, path: str, data: bytes,
                content_type: str = "text/plain; charset=utf-8") -> str:
-        r = self._c.post(
-            f"{self._storage}/object/{bucket}/{path}",
-            content=data,
-            headers={**self._h, "content-type": content_type, "x-upsert": "true"},
-        )
-        r.raise_for_status()
+        row = {"bucket": bucket, "path": path, "content_type": content_type,
+               "data": base64.b64encode(data).decode(), "ver": _ver()}
+        self._exec(f"INSERT INTO {self._db}.blobs FORMAT JSONEachRow\n{json.dumps(row)}")
         return path
 
+    def get_blob(self, bucket: str, path: str) -> Optional[tuple[bytes, str]]:
+        rows = self._rows(
+            f"SELECT data, content_type FROM {self._db}.blobs FINAL"
+            f" WHERE bucket = '{_esc(bucket)}' AND path = '{_esc(path)}'")
+        if not rows:
+            return None
+        return base64.b64decode(rows[0]["data"]), rows[0].get("content_type", "application/octet-stream")
+
     def signed_url(self, bucket: str, path: str, expires_in: int = 3600) -> str:
-        r = self._c.post(
-            f"{self._storage}/object/sign/{bucket}/{path}",
-            json={"expiresIn": expires_in},
-        )
-        r.raise_for_status()
-        # PostgREST returns a path relative to /storage/v1
-        return self._base + "/storage/v1" + r.json()["signedURL"]
+        # ClickHouse has no signed URLs; the service serves blobs from its /dl route.
+        return f"/dl/blob/{bucket}/{path}"
 
 
-_client: Optional[Supabase] = None
+def init_schema() -> None:
+    """Create the database + tables (idempotent). Run once at deploy/startup."""
+    s = settings()
+    st = Store()
+    for stmt in DDL:
+        st._exec(stmt.format(db=s.ch_database))
+    st.close()
 
 
-def db() -> Supabase:
+_client: Optional[Store] = None
+
+
+def db() -> Store:
     """Process-wide singleton (httpx.Client is thread-safe for our usage)."""
     global _client
     if _client is None:
-        _client = Supabase()
+        _client = Store()
     return _client

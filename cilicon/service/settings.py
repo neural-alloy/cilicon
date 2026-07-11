@@ -13,9 +13,11 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class Settings:
-    # --- Supabase (data + storage) ---------------------------------------
-    supabase_url: str            # https://<ref>.supabase.co
-    supabase_service_key: str    # service_role key — SERVER-SIDE ONLY
+    # --- ClickHouse (data + blobs) ---------------------------------------
+    ch_url: str                  # https://<host>:8443  (ClickHouse HTTP interface)
+    ch_user: str                 # e.g. "default"
+    ch_password: str
+    ch_database: str             # default "cilicon"
 
     # --- GitHub App ------------------------------------------------------
     gh_app_id: str
@@ -38,7 +40,7 @@ class Settings:
 
     @property
     def configured(self) -> bool:
-        return bool(self.supabase_url and self.supabase_service_key)
+        return bool(self.ch_url)
 
 
 def _key(raw: str) -> str:
@@ -53,8 +55,10 @@ def _key(raw: str) -> str:
 @functools.lru_cache(maxsize=1)
 def settings() -> Settings:
     return Settings(
-        supabase_url=os.environ.get("SUPABASE_URL", "").rstrip("/"),
-        supabase_service_key=os.environ.get("SUPABASE_SERVICE_KEY", ""),
+        ch_url=os.environ.get("CLICKHOUSE_URL", "").rstrip("/"),
+        ch_user=os.environ.get("CLICKHOUSE_USER", "default"),
+        ch_password=os.environ.get("CLICKHOUSE_PASSWORD", ""),
+        ch_database=os.environ.get("CLICKHOUSE_DATABASE", "cilicon"),
         gh_app_id=os.environ.get("GITHUB_APP_ID", ""),
         gh_app_private_key=_key(os.environ.get("GITHUB_APP_PRIVATE_KEY", "")),
         gh_webhook_secret=os.environ.get("GITHUB_WEBHOOK_SECRET", ""),
@@ -74,7 +78,7 @@ def require(*names: str) -> None:
     s = settings()
     missing = []
     mapping = {
-        "supabase": (s.supabase_url, s.supabase_service_key),
+        "clickhouse": (s.ch_url,),
         "github_app": (s.gh_app_id, s.gh_app_private_key, s.gh_webhook_secret),
         "github_oauth": (s.gh_client_id, s.gh_client_secret),
     }

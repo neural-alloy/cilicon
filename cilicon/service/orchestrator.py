@@ -1,6 +1,6 @@
 """cilicon orchestrator — webhook event → a real CI run.
 
-This is the glue between the GitHub App, the `cilicon` engine, and Supabase:
+This is the glue between the GitHub App, the `cilicon` engine, and ClickHouse:
 
   push/PR ─▶ create run row (queued) ─▶ in-progress check-run
           ─▶ clone @sha ─▶ cilicon.run_matrix ─▶ persist results + logs + artifacts
@@ -82,6 +82,14 @@ def _autoregister(e: github.Event) -> dict:
 
 
 # ── the heavy pipeline ───────────────────────────────────────────────────────
+
+def dispatch(run_id: str, e: github.Event) -> None:
+    """Schedule execute_run off the request path. Default: a daemon thread (fine
+    for a single-container dev/self-host). The Modal deploy target overrides this
+    with `runner.spawn(...)` so each run gets its own container + long timeout."""
+    import threading
+    threading.Thread(target=execute_run, args=(run_id, e), daemon=True).start()
+
 
 def execute_run(run_id: str, e: github.Event) -> None:
     """Clone, run the matrix, persist everything, update the check-run.
