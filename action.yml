@@ -12,7 +12,7 @@
 #       MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
 #
 # See docs/github-actions.md for the full setup (Modal secrets, gating PRs).
-name: cilicon
+name: cilicon action
 description: Build AND boot your firmware across every chip you ship to, in parallel, owning zero hardware.
 author: Ryan Rana
 branding:
