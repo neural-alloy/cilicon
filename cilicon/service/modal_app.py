@@ -53,7 +53,7 @@ secret = modal.Secret.from_name("cilicon-service")
 def runner(run_id: str, event_dict: dict) -> None:
     """Execute one run in its own container: clone @sha, run the matrix on Modal
     sandboxes, persist results + logs, complete the PR check."""
-    from . import github, orchestrator
+    from cilicon.service import github, orchestrator
     orchestrator.execute_run(run_id, github.Event(**event_dict))
 
 
@@ -64,8 +64,8 @@ def web():
     webhook spawns the `runner` function instead of a local thread."""
     import dataclasses
 
-    from . import orchestrator
-    from .app import app as fastapi_app
+    from cilicon.service import orchestrator
+    from cilicon.service.app import app as fastapi_app
 
     def _spawn(run_id, e):
         runner.spawn(run_id, dataclasses.asdict(e))
