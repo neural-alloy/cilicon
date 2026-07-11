@@ -1,14 +1,42 @@
-# ⚡ cilicon
+<div align="center">
 
-**CI for real hardware — build AND boot your firmware across every chip you ship
-to, in parallel, owning zero hardware.**
+<img src="assets/cilicon.png" alt="cilicon" width="104" />
 
-Regular CI tells you your code *compiled*. cilicon tells you it **runs on the
-chip** — it cross-builds each target **and boots it** in an emulator (or on a
-real GPU), in parallel on [Modal](https://modal.com), and reports **one PR
-check.** It's a step you add to your existing CI, not a new CI.
+# cilicon
 
-## Use it as a GitHub Action
+**CI for real hardware.** Build _and_ **boot** your code on every chip you ship to — in parallel, owning zero hardware.
+
+[**Get started &rarr;**](https://github.com/apps/cilicon-action/installations/new) &nbsp;·&nbsp; [Docs](https://neuralalloy.io/cilicon/docs.html) &nbsp;·&nbsp; [Marketplace](https://github.com/marketplace/actions/cilicon-action)
+
+[![GitHub Marketplace](https://img.shields.io/badge/GitHub-Marketplace-2ea44f?logo=github&logoColor=white)](https://github.com/marketplace/actions/cilicon-action)
+[![License: MIT](https://img.shields.io/badge/License-MIT-111.svg)](LICENSE)
+
+<sub>A <a href="https://neuralalloy.io"><b>Neural Alloy</b></a> product — software for hardware.</sub>
+
+</div>
+
+---
+
+Regular CI says it **compiled.** cilicon says it **boots on the chip.**
+
+Cross-build every target in your `cilicon.yml`, **boot the artifact** in a cloud emulator (or a real GPU), all in parallel — then one PR check, boot-proven and signed. A step in your CI, not a new one.
+
+```yaml
+# cilicon.yml
+targets:
+  - id: firmware/stm32
+    build: make
+    validate: qemu_system      # boot it in QEMU
+    machine: lm3s6965evb
+    expect: "BOOT OK"          # the proof it booted
+    flash_max: 256K            # …and fits the silicon
+```
+
+## Get started
+
+**The app — zero setup, no token.** [Install it](https://github.com/apps/cilicon-action/installations/new) on a repo, drop a `cilicon.yml`, push. Every PR gets a boot-tested check, run on our cloud.
+
+**Self-host** on your own [Modal](https://modal.com):
 
 ```yaml
 # .github/workflows/cilicon.yml
@@ -18,23 +46,23 @@ check.** It's a step you add to your existing CI, not a new CI.
     MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
 ```
 
-Add a `cilicon.yml`, add the two Modal secrets (`modal token new`), done. Full
-setup → **[docs/github-actions.md](docs/github-actions.md)**.
-
-## Or run it locally
+**Local**, nothing to install:
 
 ```bash
-pip install cilicon    # the cilicon CLI
-modal token new        # once
-cilicon run            # build + boot the whole matrix in parallel
+uvx --from git+https://github.com/neural-alloy/cilicon@v1 cilicon run
 ```
 
-## Docs
+## A green check is a receipt
 
-- **[Getting started](docs/getting-started.md)** — install, auth, first run
-- **[GitHub Actions](docs/github-actions.md)** — wire it into CI, gate PRs
-- **[Configuration](docs/configuration.md)** — the `cilicon.yml` reference
-- **[Tiers](docs/tiers.md)** — the validation tiers (QEMU, Renode, GPU, …)
-- **[Architecture](docs/architecture.md)** — how it works internally; start here to contribute
+- **Boot proof** — the `expect` string has to land in the real console. It ran, it didn't just link.
+- **Size gates** — `flash_max` / `ram_max` fail anything that won't fit the silicon.
+- **Signed** — `--attestation` emits an Ed25519 DSSE boot proof. Verify it anywhere.
+- **Fleet-ready** — register the proof to your [Neural Alloy](https://neuralalloy.io) fleet.
 
-MIT © Ryan Rana
+Boots MCUs (QEMU), full Linux (ARM64), Renode, and real GPUs — 100+ boards as one-word presets. **[Full docs →](https://neuralalloy.io/cilicon/docs.html)**
+
+---
+
+<div align="center">
+<sub>A <a href="https://neuralalloy.io"><b>Neural Alloy</b></a> product · cilicon is the free way in · MIT © Ryan Rana</sub>
+</div>
