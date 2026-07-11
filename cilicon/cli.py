@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import time
 
@@ -139,7 +140,62 @@ def cmd_run(args) -> int:
     _write_reports(args, results, wall)
     _write_attestation(args, results, signing_key)
     failed = passed != len(results) or (regressed and getattr(args, "fail_on_regression", False))
+    if not failed:
+        _register_and_dangle(cfg, args, results)
     return 1 if failed else 0
+
+
+def _register_and_dangle(cfg, args, results) -> None:
+    """The free→platform seam (WEDGE_SPEC §3/§4). A green run is a boot-proven
+    artifact. Absent a fleet, say so — `registered to 0 fleets` is the pitch. With
+    `neural_alloy.fleet` set (or --register / CILICON_FLEET), POST the signed boot
+    proof to /v1/releases so the same attestation the fleet agent verifies at deploy
+    is the one produced here in CI. Best-effort: a register hiccup never fails CI."""
+    na = getattr(cfg, "neural_alloy", {}) or {}
+    fleet = getattr(args, "register", "") or na.get("fleet") or os.environ.get("CILICON_FLEET", "")
+    signed = bool(getattr(args, "attestation", None))
+
+    if not fleet:
+        tail = "signed, boot-proven" if signed else "boot-proven"
+        print(c(f"  {tail} · registered to 0 fleets", DIM))
+        print(c("  → set neural_alloy.fleet in cilicon.yml to register this proof to your fleet", DIM))
+        return
+
+    if not signed:
+        print(c("  neural_alloy.fleet is set but --attestation isn't — nothing signed to register", Y))
+        return
+
+    import base64
+    import json
+    import urllib.error
+    import urllib.request
+
+    version = na.get("version") or os.environ.get("GITHUB_SHA", "")[:12] or "untagged"
+    cohort = na.get("cohort", "")
+    try:
+        with open(args.attestation, "rb") as f:
+            envelope = f.read()
+    except OSError as e:
+        print(c(f"  register skipped — can't read attestation: {e}", Y))
+        return
+
+    bundle = json.dumps({
+        "version": version,
+        "cohort": cohort,
+        "boot_test_attestation": base64.b64encode(envelope).decode(),
+    }).encode()
+    url = fleet.rstrip("/") + "/v1/releases"
+    req = urllib.request.Request(url, data=bundle, method="POST",
+                                 headers={"content-type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            body = r.read().decode()[:200]
+        print(c(f"  ✓ registered {version} → {fleet}  {body}", B))
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode()[:200]
+        print(c(f"  register rejected ({e.code}) by {fleet}: {detail}", Y))
+    except (urllib.error.URLError, TimeoutError, OSError) as e:
+        print(c(f"  register unreachable ({fleet}): {e}", Y))
 
 
 def _attestation_preflight(args):
@@ -525,6 +581,7 @@ def main(argv=None) -> int:
     pr.add_argument("--changed-since", help="git ref; run only targets whose paths match files changed since it")
     pr.add_argument("--attestation", help="write a signed DSSE boot-test attestation (in-toto) to this path")
     pr.add_argument("--signing-key", help="Ed25519 key file (PKCS8 PEM/DER or 32-byte raw seed); or set CILICON_SIGNING_KEY")
+    pr.add_argument("--register", help="register the signed boot proof to a Neural Alloy fleet (control-plane URL); or set neural_alloy.fleet / CILICON_FLEET")
     pr.set_defaults(func=cmd_run)
 
     pt = sub.add_parser("targets", help="list configured targets")

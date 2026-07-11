@@ -99,6 +99,11 @@ class Target:
 class Config:
     targets: list[Target]
     project_dir: str
+    # Optional `neural_alloy:` block — the one-key upgrade from free tier to the
+    # platform. { fleet: <control-plane url>, cohort?: str, version?: str }. Absent
+    # ⇒ a boot-proven artifact registered to nobody (the "registered to 0 fleets"
+    # dangle); present ⇒ POST the signed boot proof to /v1/releases (WEDGE_SPEC §3).
+    neural_alloy: dict = field(default_factory=dict)
 
     def get(self, target_id: str) -> Optional[Target]:
         for t in self.targets:
@@ -258,7 +263,10 @@ def load(path: str = "cilicon.yml") -> Config:
             seen.add(tgt.id)
             targets.append(tgt)
 
-    return Config(targets=targets, project_dir=project_dir)
+    na = raw.get("neural_alloy") or {}
+    if na and not isinstance(na, dict):
+        raise SystemExit("cilicon: `neural_alloy` must be a mapping (fleet:, cohort:, version:)")
+    return Config(targets=targets, project_dir=project_dir, neural_alloy=na)
 
 
 def _merge_boards(user_boards: dict) -> dict:

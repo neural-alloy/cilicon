@@ -47,6 +47,10 @@ inputs:
     description: fail the check if a size regression exceeds the threshold
     required: false
     default: "false"
+  register:
+    description: register the signed boot proof to a Neural Alloy fleet (control-plane URL)
+    required: false
+    default: ""
 runs:
   using: composite
   steps:
@@ -65,7 +69,8 @@ runs:
           --artifacts "${{ inputs.artifacts }}" \
           ${{ inputs.telemetry && format('--telemetry {0}', inputs.telemetry) || '' }} \
           ${{ inputs.baseline && format('--baseline {0}', inputs.baseline) || '' }} \
-          ${{ inputs.fail-on-regression == 'true' && '--fail-on-regression' || '' }}
+          ${{ inputs.fail-on-regression == 'true' && '--fail-on-regression' || '' }} \
+          ${{ inputs.register && format('--register {0}', inputs.register) || '' }}
     - name: Upload artifacts + report
       if: always()
       uses: actions/upload-artifact@v4

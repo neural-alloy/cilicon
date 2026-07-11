@@ -1,3 +1,11 @@
+# The one-key upgrade to the Neural Alloy platform (optional). Without it, a green
+# run prints "registered to 0 fleets" — a boot-proven, signed artifact with nowhere
+# to go. Set it, and the SAME DSSE boot proof the fleet agent verifies at deploy is
+# registered here in CI:
+# neural_alloy:
+#   fleet: https://control-plane.internal   # POST the signed proof to /v1/releases
+#   cohort: edda                            # optional target cohort
+
 # cilicon.yml — one matrix, every target builds AND boots in parallel.
 # Each target carries its own toolchain image and its own proof-it-runs.
 
