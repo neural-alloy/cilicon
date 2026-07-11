@@ -1,11 +1,7 @@
-# cilicon — build AND boot every target in cilicon.yml on every push / PR.
-#
-# This repo dogfoods its own action (uses: ./). In YOUR repo you'd write:
-#     uses: neural-alloy/cilicon@v1
-#
-# Setup (once): add two repo secrets from `modal token new`:
-#     MODAL_TOKEN_ID, MODAL_TOKEN_SECRET
-# Then make "cilicon / build + boot" a required status check to gate merges.
+# cilicon's own CI. The GATE is the test suite (offline, deterministic, real
+# signal). The boot-matrix dogfood runs the action against this repo's demo
+# cilicon.yml — which deliberately includes a target that fails (pi5-loadtest,
+# to show what a red check looks like), so it is informational, never the gate.
 name: cilicon
 
 on:
@@ -14,8 +10,30 @@ on:
   pull_request:
 
 jobs:
-  build-and-boot:
-    name: build + boot          # → check shows up as "cilicon / build + boot"
+  # ── the real gate: lint + the Modal-free test suite ──────────────────────
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: install
+        run: pip install -e ".[dev,service]"
+      - name: ruff
+        run: ruff check cilicon
+      - name: pytest
+        run: pytest -q
+      - name: doctor (validate the demo config, offline)
+        run: cilicon -c cilicon.yml doctor
+
+  # ── build + boot on real Modal, an all-green matrix (a real gate) ────────
+  # Runs cilicon.ci.yml (a lean subset of the demo: an MCU firmware boot + an
+  # ARM64 Linux full-system boot, both pass). Needs MODAL_TOKEN_* repo secrets.
+  # In YOUR repo you'd write `uses: neural-alloy/cilicon@v1`.
+  boot-matrix:
+    name: build + boot
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -25,7 +43,7 @@ jobs:
       - name: cilicon
         uses: ./                 # in your repo: neural-alloy/cilicon@v1
         with:
-          config: cilicon.yml
+          config: cilicon.ci.yml
         env:
           MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
           MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}

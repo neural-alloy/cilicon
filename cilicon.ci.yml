@@ -1,0 +1,34 @@
+# cilicon's own CI matrix — a lean, all-green subset of the demo cilicon.yml,
+# run on real Modal on every push (see .github/workflows/cilicon.yml). It proves
+# the two things the product claims, and both genuinely pass:
+#   • a bare-metal MCU firmware BOOTS in QEMU (virtual UART -> "BOOT OK")
+#   • an ARM64 Linux kernel BOOTS and runs the artifact as init
+# The full demo cilicon.yml has more targets, including one that fails on purpose
+# to show a red check — that one is deliberately NOT here.
+
+targets:
+  # Bare-metal Cortex-M: build, boot in qemu-system-arm, assert the UART line,
+  # and prove it fits flash/RAM. Fast (~6s).
+  - id: stm32h7/cortex-m
+    base: debian:bookworm-slim
+    apt: [gcc-arm-none-eabi, qemu-system-arm]
+    build: >
+      arm-none-eabi-gcc -mcpu=cortex-m3 -mthumb -nostartfiles -nostdlib
+      -ffreestanding -Wl,--build-id=none -T src/cortex-m.ld
+      src/firmware.c -o build/firmware.elf
+    validate: qemu_system
+    machine: lm3s6965evb
+    artifact: build/firmware.elf
+    expect: "BOOT OK"
+    size_tool: arm-none-eabi-size
+    flash_max: 1M
+    ram_max: 256K
+
+  # Full-system ARM64 Linux boot: a real kernel boots the static ELF as init.
+  # `board: jetson-thor` resolves to the qemu_system_linux_aarch64 tier.
+  - id: jetson-thor/linux-boot
+    board: jetson-thor
+    build: aarch64-linux-gnu-gcc -static -O2 src/perception.c -o build/perception-arm64
+    artifact: build/perception-arm64
+    expect: "perception: engine ok"
+    boot_timeout: 120
