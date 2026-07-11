@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/cilicon.png" alt="cilicon" width="104" />
+<img src="assets/neural-alloy.png" alt="Neural Alloy" width="150" />
 
 # cilicon
 
