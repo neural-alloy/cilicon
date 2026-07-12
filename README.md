@@ -4,17 +4,14 @@
 
 # cilicon
 
-**CI for real hardware** — build _and_ **boot** your code on every chip you ship to, in parallel, owning zero hardware.
+boots your firmware and inference on **N** real targets. **0** setup, **0** hardware to own.
 
-[**Get started**](https://github.com/marketplace/actions/cilicon-action)&nbsp;&nbsp;·&nbsp;&nbsp;[Docs](https://neuralalloy.io/cilicon/docs.html)&nbsp;&nbsp;·&nbsp;&nbsp;[Neural Alloy](https://neuralalloy.io)
+[Use on Github](https://github.com/marketplace/actions/cilicon-action)&nbsp;&nbsp;·&nbsp;&nbsp;[Docs](https://neuralalloy.io/cilicon/docs.html)&nbsp;&nbsp;·&nbsp;&nbsp;[Neural Alloy](https://neuralalloy.io)
 
 </div>
 
 ---
-
-Regular CI says it **compiled.** cilicon says it **boots on the chip.**
-
-Cross-build every target in your `cilicon.yml`, **boot the artifact** in a cloud emulator (or a real GPU), all in parallel — then one PR check, boot-proven and signed. A step in your CI, not a new one.
+Cross-build every target in your `cilicon.yml`, **boot the artifact** in the cloud in parallel — then one PR check, boot-proven and signed. A step in your CI, not a new one.
 
 ```yaml
 # cilicon.yml
